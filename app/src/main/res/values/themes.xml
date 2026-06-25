@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- res/values/themes.xml -->
+<resources>
+
+    <style name="Theme.WallpaperTool" parent="Theme.Material3.Light.NoActionBar">
+
+        <item name="colorPrimary">#36618C</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorPrimaryContainer">#E4E7FF</item>
+        <item name="colorOnPrimaryContainer">#0B1270</item>
+
+        <item name="colorSecondary">#5C5F82</item>
+        <item name="colorOnSecondary">#FFFFFF</item>
+        <item name="colorSecondaryContainer">#E2E1FF</item>
+        <item name="colorOnSecondaryContainer">#191C3F</item>
+
+        <item name="colorTertiary">#7D5260</item>
+        <item name="colorOnTertiary">#FFFFFF</item>
+        <item name="colorTertiaryContainer">#FFD8E4</item>
+        <item name="colorOnTertiaryContainer">#31101D</item>
+
+        <!-- 白天：卡片背景略灰，区别于纯白页面背景 -->
+        <item name="colorSurface">#FFFFFF</item>
+        <item name="colorOnSurface">#1B1B1F</item>
+        <item name="colorSurfaceVariant">#EBEBF4</item>
+        <item name="colorOnSurfaceVariant">#47464F</item>
+        <item name="android:colorBackground">#F4F4FA</item>
+
+        <item name="colorOutline">#787680</item>
+        <item name="colorOutlineVariant">#E2E2EC</item>
+
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightNavigationBar">true</item>
+
+    </style>
+
+</resources>

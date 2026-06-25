@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- res/values/colors.xml -->
+<!-- 固定色值，语义色在 themes.xml 中通过 Material3 动态色系映射 -->
+<resources>
+    <!-- Brand 主色（蓝紫，呼应 MIUI/HyperOS 风格） -->
+    <color name="brand_primary">#36618C</color>
+    <color name="brand_primary_dark">#36618C</color>
+
+    <!-- Surface（白天） -->
+    <color name="surface_light">#FFFFFF</color>
+    <color name="surface_variant_light">#F3F3F8</color>
+    <color name="background_light">#F6F6FB</color>
+
+    <!-- Surface（黑夜） -->
+    <color name="surface_dark">#1E1E24</color>
+    <color name="surface_variant_dark">#28282F</color>
+    <color name="background_dark">#141418</color>
+
+    <!-- Outline -->
+    <color name="outline_variant_light">#E2E2EC</color>
+    <color name="outline_variant_dark">#38383F</color>
+</resources>
