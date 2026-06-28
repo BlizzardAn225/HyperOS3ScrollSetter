@@ -4,7 +4,7 @@
 
     <style name="Theme.WallpaperTool" parent="Theme.Material3.Light.NoActionBar">
 
-        <item name="colorPrimary">#36618C</item>
+        <item name="colorPrimary">#266388</item>
         <item name="colorOnPrimary">#FFFFFF</item>
         <item name="colorPrimaryContainer">#E4E7FF</item>
         <item name="colorOnPrimaryContainer">#0B1270</item>
@@ -22,9 +22,9 @@
         <!-- 白天：卡片背景略灰，区别于纯白页面背景 -->
         <item name="colorSurface">#FFFFFF</item>
         <item name="colorOnSurface">#1B1B1F</item>
-        <item name="colorSurfaceVariant">#EBEBF4</item>
+        <item name="colorSurfaceVariant">#F3F4FA</item>
         <item name="colorOnSurfaceVariant">#47464F</item>
-        <item name="android:colorBackground">#F4F4FA</item>
+        <item name="android:colorBackground">#F8F8FA</item>
 
         <item name="colorOutline">#787680</item>
         <item name="colorOutlineVariant">#E2E2EC</item>
