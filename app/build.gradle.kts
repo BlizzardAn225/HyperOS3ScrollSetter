@@ -11,7 +11,7 @@ android {
             val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
 
             output.outputFileName =
-                "WallpaperSetter_v${versionName}_debug.apk"
+                "WallpaperSetter_v${versionName}_release.apk"
         }
     }
 
@@ -20,7 +20,7 @@ android {
         minSdk = 29
         targetSdk = 34
         versionCode = 1
-        versionName = "1.0.1"
+        versionName = "1.3.1"
     }
 
     buildTypes {
@@ -46,5 +46,5 @@ dependencies {
     implementation("androidx.coordinatorlayout:coordinatorlayout:1.3.0")
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
-
+    compileOnly("de.robv.android.xposed:api:82")
 }

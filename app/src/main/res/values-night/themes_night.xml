@@ -4,9 +4,9 @@
 
     <style name="Theme.WallpaperTool" parent="Theme.Material3.Dark.NoActionBar">
 
-        <item name="colorPrimary">#A8C8F7</item>
+        <item name="colorPrimary">#95CDF9</item>
         <item name="colorOnPrimary">#0B2D53</item>
-        <item name="colorPrimaryContainer">#36618C</item>
+        <item name="colorPrimaryContainer">#95CDF9</item>
         <item name="colorOnPrimaryContainer">#0B2D53</item>
 
         <item name="colorSecondary">#C4C3EB</item>

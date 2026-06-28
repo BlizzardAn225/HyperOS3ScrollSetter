@@ -6,12 +6,20 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"
         android:icon="@mipmap/logo"
         android:label="壁纸设置器"
         android:theme="@style/Theme.WallpaperTool">
+
+        <!-- LSPosed 模块声明 -->
+        <meta-data android:name="xposedmodule" android:value="true" />
+        <meta-data android:name="xposeddescription" android:value="Fix wallpaper scroll on OS3 and set wallpapers" />
+        <meta-data android:name="xposedminversion" android:value="82" />
+        <meta-data android:name="xposedscope"
+            android:value="com.miui.miwallpaper;com.android.thememanager;com.miui.aod" />
 
         <activity
             android:name=".MainActivity"
