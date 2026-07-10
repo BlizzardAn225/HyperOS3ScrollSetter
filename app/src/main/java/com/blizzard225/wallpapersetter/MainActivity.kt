@@ -23,6 +23,7 @@ import com.google.android.material.chip.ChipGroup
 import com.google.android.material.textfield.TextInputEditText
 import rikka.shizuku.Shizuku
 import android.content.pm.PackageManager
+import com.google.android.material.checkbox.MaterialCheckBox
 
 class MainActivity : AppCompatActivity() {
 
@@ -46,6 +47,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var moduleStatusCard: MaterialCardView
     private lateinit var moduleStatusIcon: TextView
     private lateinit var moduleStatusText: TextView
+    private lateinit var cbApplyBoth: MaterialCheckBox
 
     private val imagePicker =
         registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -80,6 +82,7 @@ class MainActivity : AppCompatActivity() {
         moduleStatusCard = findViewById(R.id.moduleStatusCard)
         moduleStatusIcon = findViewById(R.id.moduleStatusIcon)
         moduleStatusText = findViewById(R.id.moduleStatusText)
+        cbApplyBoth = findViewById(R.id.cbApplyBoth)
 
         checkModuleStatus()
 
@@ -93,6 +96,20 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.btnSetLock).setOnClickListener {
             applyCropAndSetLockWallpaper()
+        }
+
+        cbApplyBoth.setOnCheckedChangeListener { _, isChecked ->
+            val btnSetStandard = findViewById<MaterialButton>(R.id.btnSetStandard)
+            val btnSetLock = findViewById<MaterialButton>(R.id.btnSetLock)
+            if (isChecked) {
+                btnSetStandard.text = "设置桌面 + 锁屏壁纸"
+                btnSetLock.isEnabled = false
+                btnSetLock.alpha = 0.5f
+            } else {
+                btnSetStandard.text = "设置桌面壁纸"
+                btnSetLock.isEnabled = true
+                btnSetLock.alpha = 1.0f
+            }
         }
 
         setupRatioChips()
@@ -405,7 +422,45 @@ class MainActivity : AppCompatActivity() {
         }
 
         croppedBitmap = cropped
-        setWallpaperStandard(croppedBitmap!!)
+
+        if (cbApplyBoth.isChecked) {
+            setWallpaperBoth(croppedBitmap!!)
+        } else {
+            setWallpaperStandard(croppedBitmap!!)
+        }
+    }
+
+    private fun setWallpaperBoth(bitmap: Bitmap) {
+        try {
+            val wm = WallpaperManager.getInstance(this)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                wm.setBitmap(
+                    bitmap,
+                    null,
+                    true,
+                    WallpaperManager.FLAG_SYSTEM or WallpaperManager.FLAG_LOCK
+                )
+            } else {
+                wm.setBitmap(bitmap)
+            }
+
+            Toast.makeText(
+                this,
+                "桌面 + 锁屏壁纸已设置\n锁屏将跟随桌面滚动",
+                Toast.LENGTH_LONG
+            ).show()
+
+            showPostSetupHint()
+
+        } catch (e: Exception) {
+
+            Toast.makeText(
+                this,
+                "设置失败: ${e.message}",
+                Toast.LENGTH_LONG
+            ).show()
+        }
     }
 
     private fun setWallpaperStandard(bitmap: Bitmap) {

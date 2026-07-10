@@ -223,6 +223,29 @@ public class MainHook implements IXposedHookLoadPackage {
         } catch (Throwable t) {
             XposedBridge.log(TAG + ": Hook MiWallpaperApplication.onCreate failed: " + t);
         }
+
+        // 强制桌面壁纸在锁屏上可见，使同图壁纸时锁屏跟随桌面滚动
+        try {
+            XposedHelpers.findAndHookMethod(
+                    "com.miui.miwallpaper.manager.WallpaperServiceController",
+                    lpparam.classLoader,
+                    "setDesktopWallpaperShowWhenLocked",
+                    boolean.class,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            boolean original = (boolean) param.args[0];
+                            if (!original) {
+                                param.args[0] = true;
+                                XposedBridge.log(TAG + ": setDesktopWallpaperShowWhenLocked false->true");
+                            }
+                        }
+                    }
+            );
+            XposedBridge.log(TAG + ": Hook setDesktopWallpaperShowWhenLocked OK");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + ": Hook setDesktopWallpaperShowWhenLocked failed: " + t);
+        }
     }
 
     private void registerScrollObserver(final Context context) {
