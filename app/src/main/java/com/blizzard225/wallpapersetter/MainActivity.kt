@@ -313,63 +313,82 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun enableScroll() {
-        Toast.makeText(this, "正在通过 Shizuku 执行...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "正在执行，请稍候...", Toast.LENGTH_SHORT).show()
 
         Thread {
             try {
-                val clazz = Class.forName("rikka.shizuku.Shizuku")
-                val method = clazz.getDeclaredMethod(
-                    "newProcess",
-                    Array<String>::class.java,
-                    Array<String>::class.java,
-                    String::class.java
-                )
-                method.isAccessible = true
+                val startTime = System.currentTimeMillis()
+                var killed = false
 
-                val putProcess = method.invoke(
-                    null,
-                    arrayOf("settings", "put", "secure", "pref_key_wallpaper_screen_scrolled_span", "1"),
-                    null,
-                    null
-                ) as Process
+                while (true) {
+                    val elapsed = System.currentTimeMillis() - startTime
 
-                val exitCode = putProcess.waitFor()
+                    // 执行 settings put
+                    runShizukuCommand("settings", "put", "secure",
+                        "pref_key_wallpaper_screen_scrolled_span", "1")
 
-                if (exitCode != 0) {
-                    runOnUiThread {
-                        Toast.makeText(this, "执行失败，退出码：$exitCode", Toast.LENGTH_LONG).show()
-                        copyCommandToClipboard()
+                    // 约1秒后杀进程（给settings put一点时间先写入）
+                    if (!killed && elapsed >= 1000) {
+                        runShizukuCommand("am", "force-stop", "com.miui.miwallpaper")
+                        killed = true
                     }
-                    return@Thread
-                }
 
-                val getProcess = method.invoke(
-                    null,
-                    arrayOf("settings", "get", "secure", "pref_key_wallpaper_screen_scrolled_span"),
-                    null,
-                    null
-                ) as Process
+                    // 杀进程3秒后停止循环
+                    if (killed && elapsed >= 4000) {
+                        break
+                    }
 
-                val result = getProcess.inputStream.bufferedReader().use { it.readText().trim() }
-                getProcess.waitFor()
-
-                val display = when (result) {
-                    "1" -> "随屏滚动已开启（当前值：1）"
-                    "0" -> "随屏滚动已关闭（当前值：0）"
-                    "" -> "随屏滚动未设置（当前值：null）"
-                    else -> "随屏滚动已开启（当前值：$result）"
+                    Thread.sleep(500)
                 }
 
                 runOnUiThread {
-                    Toast.makeText(this, display, Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "随屏滚动已开启", Toast.LENGTH_LONG).show()
                 }
+
             } catch (e: Exception) {
                 runOnUiThread {
                     Toast.makeText(this, "执行异常：${e.message}", Toast.LENGTH_LONG).show()
-                    copyCommandToClipboard()
                 }
             }
         }.start()
+    }
+
+    private fun runShizukuCommand(vararg args: String): Int {
+        return try {
+            val clazz = Class.forName("rikka.shizuku.Shizuku")
+            val method = clazz.getDeclaredMethod(
+                "newProcess",
+                Array<String>::class.java,
+                Array<String>::class.java,
+                String::class.java
+            )
+            method.isAccessible = true
+            val process = method.invoke(null, args, null, null) as Process
+            process.waitFor()
+        } catch (e: Exception) {
+            -1
+        }
+    }
+
+    private fun shizukuExec(
+        newProcess: java.lang.reflect.Method,
+        command: Array<String>
+    ): Int {
+        val process = newProcess.invoke(null, command, null, null) as Process
+        val exitCode = process.waitFor()
+        process.destroy()
+        return exitCode
+    }
+
+    private fun shizukuGet(
+        newProcess: java.lang.reflect.Method,
+        command: Array<String>
+    ): String {
+        val process = newProcess.invoke(null, command, null, null) as Process
+        val result = process.inputStream.bufferedReader().use { it.readText().trim() }
+        process.waitFor()
+        process.destroy()
+        return result
     }
 
     private fun copyCommandToClipboard() {
