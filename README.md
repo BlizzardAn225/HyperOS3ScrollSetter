@@ -112,17 +112,14 @@ cd HyperOS3-Scroll-Setter
 
 ### Compatibility
 
-| Device | System Version | Root/Shizuku | Status |
-|--------|----------------|--------------|--------|
-| Xiaomi Pad 8 Pro | HyperOS 3 | Root | ✅ Tested |
-| Xiaomi Pad 8 Pro | HyperOS 3 | Shizuku | ✅ Tested |
-| Xiaomi 17 Ultra | HyperOS 3 | Root | ✅ Tested |
-| Xiaomi 17 Ultra | HyperOS 3 | Shizuku | ✅ Tested |
-| Redmi K Pad | HyperOS 3 | Shizuku | ✅ Tested |
-| Xiaomi 17 Pro | HyperOS 3 | Root | ✅ Tested |
-| Xiaomi 15 Pro | HyperOS 3 | Root | ✅ Tested |
-| Other Xiaomi devices | HyperOS 3 | Root | Theoretically works |
-| Other Xiaomi devices | HyperOS 3 | Shizuku | Theoretically works, but scrolling needs to be re-enabled after reboot |
+All devices running on HyperOS 3.
+
+| Root/Shizuku | Devices | Status |
+| :--- | :--- | :--- |
+| **Root** | Xiaomi 17 Ultra, Xiaomi 17 Pro, Xiaomi 15 Pro, Xiaomi Pad 8 Pro | ✅ Tested |
+| **Shizuku** | Xiaomi 17 Ultra, Xiaomi Pad 8 Pro, Redmi K Pad | ✅ Tested |
+| **Root** | Other Xiaomi devices (HyperOS 3) | Theoretically works |
+| **Shizuku** | Other Xiaomi devices (HyperOS 3) | Theoretically works, but scrolling needs to be re-enabled after reboot |
 
 ### License
 
@@ -242,17 +239,14 @@ cd HyperOS3-Scroll-Setter
 
 ### 兼容性
 
-| 设备        | 系统版本  | Root/Shizuku | 状态                 |
-| --------- | ----- | ------------ | ------------------ |
-| 小米平板8 Pro | 澎湃OS3 | Root         | ✅ 已测试              |
-| 小米平板8 Pro | 澎湃OS3 | Shizuku         | ✅ 已测试              |
-| 小米17 Ultra    | 澎湃OS3 | Root         | ✅ 已测试 |
-| 小米17 Ultra    | 澎湃OS3 | Shizuku      | ✅ 已测试 |
-| 红米K Pad   | 澎湃OS3 | Shizuku      | ✅ 已测试              |
-| 小米17 Pro    | 澎湃OS3 | Root         | ✅ 已测试 |
-| 小米15 Pro    | 澎湃OS3 | Root         | ✅ 已测试|
-| 其他小米设备    | 澎湃OS3 | Root      | 理论上可行|
-| 其他小米设备    | 澎湃OS3 | Shizuku      | 理论上可行，重启后需重新开启随屏滚动|
+以下均为澎湃OS3设备
+
+| Root/Shizuku | 设备 | 状态 |
+| :--- | :--- | :--- |
+| Root | 小米17 Ultra, 小米17 Pro, 小米15 Pro, 小米平板8 Pro | ✅ 已测试 |
+| Shizuku | 小米17 Ultra, 小米平板8 Pro, 红米K Pad | ✅ 已测试 |
+| Root | 其他小米设备 (澎湃OS3) | 理论上可行 |
+| Shizuku | 其他小米设备 (澎湃OS3) | 理论上可行，重启后需重新开启随屏滚动 |
 
 ### 许可证
 
