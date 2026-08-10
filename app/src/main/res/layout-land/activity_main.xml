@@ -344,6 +344,14 @@
                             android:layout_marginBottom="14dp" />
 
                         <com.google.android.material.checkbox.MaterialCheckBox
+                            android:id="@+id/cbAntiDarken"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="不压暗壁纸"
+                            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                            android:layout_marginBottom="8dp" />
+
+                        <com.google.android.material.checkbox.MaterialCheckBox
                             android:id="@+id/cbApplyBoth"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"

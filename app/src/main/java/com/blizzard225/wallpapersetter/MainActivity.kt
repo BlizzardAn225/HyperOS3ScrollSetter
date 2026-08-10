@@ -1,15 +1,19 @@
 package com.blizzard225.wallpapersetter
 
 import android.app.WallpaperManager
+import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.View
 import android.widget.Button
 import android.widget.TextView
@@ -37,6 +41,11 @@ class MainActivity : AppCompatActivity() {
     private var shizukuInitialized = false
 
     private val SHIZUKU_PERMISSION_REQUEST_CODE = 1001
+    private val ANTI_DARKEN_PREFS = "wallpaper_anti_darken_prefs"
+    private val ANTI_DARKEN_ENABLED_KEY = "enabled"
+    private val ANTI_DARKEN_SETTINGS_KEY = "wallpaper_anti_darken_enabled"
+    private val ACTION_UPDATE_ANTI_DARKEN = "com.blizzard225.wallpapersetter.ACTION_UPDATE_ANTI_DARKEN"
+    private val WALLPAPER_PKG = "com.miui.miwallpaper"
 
     private lateinit var cropImageView: CropImageView
     private lateinit var cropOptionsCard: View
@@ -49,6 +58,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var moduleStatusIcon: TextView
     private lateinit var moduleStatusText: TextView
     private lateinit var cbApplyBoth: MaterialCheckBox
+    private lateinit var cbAntiDarken: MaterialCheckBox
 
     private val imagePicker =
         registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -85,8 +95,10 @@ class MainActivity : AppCompatActivity() {
         moduleStatusIcon = findViewById(R.id.moduleStatusIcon)
         moduleStatusText = findViewById(R.id.moduleStatusText)
         cbApplyBoth = findViewById(R.id.cbApplyBoth)
+        cbAntiDarken = findViewById(R.id.cbAntiDarken)
 
         checkModuleStatus()
+        setupAntiDarkenCheckbox()
 
         btnPick.setOnClickListener {
             imagePicker.launch("image/*")
@@ -257,6 +269,7 @@ class MainActivity : AppCompatActivity() {
     private fun checkModuleStatus() {
         moduleActive = ModuleStatus.isActive
         updateModuleStatusCard()
+        updateAntiDarkenLabel()
         if (!moduleActive) {
             initShizuku()
         }
@@ -443,13 +456,34 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        croppedBitmap = cropped
-
-        if (cbApplyBoth.isChecked) {
-            setWallpaperBoth(croppedBitmap!!)
-        } else {
-            setWallpaperStandard(croppedBitmap!!)
+        val both = cbApplyBoth.isChecked
+        applyCompensated(cropped) { bitmap ->
+            if (both) {
+                setWallpaperBoth(bitmap)
+            } else {
+                setWallpaperStandard(bitmap)
+            }
         }
+    }
+
+    /**
+     * 若免Root+Shizuku 且勾选了逆运算，则在后台线程对壁纸做逆运算提亮，
+     * 完成后回到主线程回调；模块模式或未勾选时直接回调原图。
+     */
+    private fun applyCompensated(bitmap: Bitmap, callback: (Bitmap) -> Unit) {
+        if (!cbAntiDarken.isChecked || moduleActive) {
+            croppedBitmap = bitmap
+            callback(bitmap)
+            return
+        }
+        Toast.makeText(this, "正在逆运算还原壁纸颜色...", Toast.LENGTH_SHORT).show()
+        Thread {
+            val compensated = compensateAntiDarken(bitmap)
+            runOnUiThread {
+                croppedBitmap = compensated
+                callback(compensated)
+            }
+        }.start()
     }
 
     private fun setWallpaperBoth(bitmap: Bitmap) {
@@ -469,11 +503,9 @@ class MainActivity : AppCompatActivity() {
 
             Toast.makeText(
                 this,
-                "桌面 + 锁屏壁纸已设置\n锁屏将跟随桌面滚动",
+                "桌面 + 锁屏壁纸已设置",
                 Toast.LENGTH_LONG
             ).show()
-
-            showPostSetupHint()
 
         } catch (e: Exception) {
 
@@ -506,8 +538,6 @@ class MainActivity : AppCompatActivity() {
                 Toast.LENGTH_LONG
             ).show()
 
-            showPostSetupHint()
-
         } catch (e: Exception) {
 
             Toast.makeText(
@@ -530,8 +560,9 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        croppedBitmap = cropped
-        setWallpaperLock(croppedBitmap!!)
+        applyCompensated(cropped) { bitmap ->
+            setWallpaperLock(bitmap)
+        }
     }
 
     private fun setWallpaperLock(bitmap: Bitmap) {
@@ -565,12 +596,161 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showPostSetupHint() {
-        if (moduleActive) return
-        Toast.makeText(
-            this,
-            "壁纸已设置。\n建议开启随屏滚动。",
-            Toast.LENGTH_LONG
-        ).show()
+    private fun setupAntiDarkenCheckbox() {
+        // 模块模式下开关状态由壁纸进程 hook 经 Settings.Secure 维护（跨进程可靠）；
+        // 免Root 模式存于 APP 自身 SharedPreferences，直接读 isChecked 即时生效。
+        val saved = if (moduleActive) {
+            try {
+                Settings.Secure.getInt(contentResolver, ANTI_DARKEN_SETTINGS_KEY, 0) == 1
+            } catch (e: Exception) {
+                false
+            }
+        } else {
+            try {
+                getSharedPreferences(ANTI_DARKEN_PREFS, Context.MODE_PRIVATE)
+                    .getBoolean(ANTI_DARKEN_ENABLED_KEY, false)
+            } catch (e: Exception) {
+                false
+            }
+        }
+        cbAntiDarken.isChecked = saved
+
+        // 根据激活模式设置不同文字
+        updateAntiDarkenLabel()
+
+        cbAntiDarken.setOnCheckedChangeListener { _, isChecked ->
+            // 持久化到 APP 自身 SharedPreferences（免Root 逆运算路径使用）
+            try {
+                getSharedPreferences(ANTI_DARKEN_PREFS, Context.MODE_PRIVATE)
+                    .edit().putBoolean(ANTI_DARKEN_ENABLED_KEY, isChecked).apply()
+            } catch (e: Exception) {
+            }
+            if (moduleActive) {
+                // 模块模式：广播通知壁纸进程 hook 更新防压暗开关
+                try {
+                    val intent = Intent(ACTION_UPDATE_ANTI_DARKEN)
+                    intent.setPackage(WALLPAPER_PKG)
+                    intent.putExtra("enabled", isChecked)
+                    sendBroadcast(intent)
+                } catch (e: Exception) {
+                }
+                Toast.makeText(this, "需重启壁纸APP后生效", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun updateAntiDarkenLabel() {
+        if (moduleActive) {
+            cbAntiDarken.text = "不压暗壁纸，更改后需重启壁纸APP"
+        } else {
+            cbAntiDarken.text = "逆运算，压暗后壁纸颜色被还原"
+        }
+    }
+
+    /**
+     * 构建 reverseLut：reverseLut[k] = 输入明度 z_X（0..1），使得
+     * transformColor(z_X) 输出的明度 ≈ k/255 * 0.9。
+     *
+     * shader 中 transformColor 对明度 z 的正向映射：
+     *   v' = mix(z, z*0.9 + 0.1, z) = 1.1z - 0.1z²
+     *   最终明度 = v' * (1 - 0.1*z) = (1.1z - 0.1z²)(1 - 0.1z)，值域约为 [0, 0.9]
+     */
+    private fun buildReverseLut(): FloatArray {
+        val forwardLut = FloatArray(256)
+        for (i in 0 until 256) {
+            val z = i / 255f
+            val vp = 1.1f * z - 0.1f * z * z
+            forwardLut[i] = vp * (1f - 0.1f * z)
+        }
+        val reverseLut = FloatArray(256)
+        for (k in 0 until 256) {
+            val target = (k / 255f) * 0.9f
+            var lo = 0
+            var hi = 255
+            while (lo < hi) {
+                val mid = (lo + hi + 1) ushr 1
+                if (forwardLut[mid] <= target) lo = mid else hi = mid - 1
+            }
+            reverseLut[k] = lo / 255f
+        }
+        return reverseLut
+    }
+
+    /**
+     * 对原始 Bitmap 执行 transformColor 的逆运算，得到"应设置"的壁纸 X，
+     * 使得系统压暗（transformColor）后表现为原图。
+     *
+     * 每个像素：
+     *   (1) 原图 HSV(h, s, v)
+     *   (2) z_X = reverseLut(v) —— 使 (1.1z_X - 0.1z_X²)(1 - 0.1z_X) = v
+     *   (3) s_X = s / 0.98（因为正向把饱和度乘 0.98）
+     *   (4) 输出 X = hsv2rgb(h, s_X, z_X)
+     */
+    private fun compensateAntiDarken(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        val pixels = IntArray(w * h)
+        src.getPixels(pixels, 0, w, 0, 0, w, h)
+        val reverseLut = buildReverseLut()
+
+        for (i in pixels.indices) {
+            val p = pixels[i]
+            val a = (p shr 24) and 0xFF
+            val r = ((p shr 16) and 0xFF) / 255f
+            val g = ((p shr 8) and 0xFF) / 255f
+            val b = (p and 0xFF) / 255f
+
+            // 原图 HSV
+            val maxC = maxOf(r, g, b)
+            val minC = minOf(r, g, b)
+            val delta = maxC - minC
+
+            var hue = 0f
+            var sat = 0f
+            if (maxC > 0f && delta > 1e-6f) {
+                sat = delta / maxC
+                hue = when (maxC) {
+                    r -> ((g - b) / delta % 6f + 6f) % 6f
+                    g -> (b - r) / delta + 2f
+                    else -> (r - g) / delta + 4f
+                }
+                hue /= 6f
+            }
+
+            // z_X：反查使压暗后明度=原明度的输入明度
+            val vOrig = maxC
+            var zX = 1f
+            if (vOrig < 0.9f) {
+                zX = reverseLut[((vOrig / 0.9f) * 255f).toInt().coerceIn(0, 255)]
+            }
+
+            // s_X：补偿饱和度（上限 1 防溢出）
+            val satX = (sat / 0.98f).coerceAtMost(1f)
+
+            // HSV(h, satX, zX) → RGB
+            val hi = (hue * 6f).toInt()
+            val f = hue * 6f - hi
+            val pVal = zX * (1f - satX)
+            val qVal = zX * (1f - f * satX)
+            val tVal = zX * (1f - (1f - f) * satX)
+
+            val (rF, gF, bF) = when (hi % 6) {
+                0 -> Triple(zX, tVal, pVal)
+                1 -> Triple(qVal, zX, pVal)
+                2 -> Triple(pVal, zX, tVal)
+                3 -> Triple(pVal, qVal, zX)
+                4 -> Triple(tVal, pVal, zX)
+                else -> Triple(zX, pVal, qVal)
+            }
+
+            pixels[i] = (a shl 24) or
+                    ((rF.coerceIn(0f, 1f) * 255f).toInt() shl 16) or
+                    ((gF.coerceIn(0f, 1f) * 255f).toInt() shl 8) or
+                    (bF.coerceIn(0f, 1f) * 255f).toInt()
+        }
+
+        val result = Bitmap.createBitmap(w, h, src.config)
+        result.setPixels(pixels, 0, w, 0, 0, w, h)
+        return result
     }
 }

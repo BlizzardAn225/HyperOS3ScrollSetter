@@ -3,10 +3,14 @@ package com.blizzard225.wallpaperscrollfix;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.database.ContentObserver;
 import android.graphics.Bitmap;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
@@ -27,6 +31,12 @@ public class MainHook implements IXposedHookLoadPackage {
     private static final String TAG = "WallpaperScrollFix";
     private static final String SCROLL_KEY = "pref_key_wallpaper_screen_scrolled_span";
     private static final String CHANNEL_ID = "wallpaper_scroll_fix";
+
+    // 防压暗开关：APP 勾选状态经广播同步到此进程，并持久化到 Settings.Secure
+    private static final String ACTION_UPDATE_ANTI_DARKEN =
+            "com.blizzard225.wallpapersetter.ACTION_UPDATE_ANTI_DARKEN";
+    private static final String ANTI_DARKEN_KEY = "wallpaper_anti_darken_enabled";
+    private static volatile boolean sAntiDarkenEnabled = false;
 
     private static final ThreadLocal<Boolean> sIsLockscreenWallpaper = new ThreadLocal<>();
 
@@ -215,13 +225,89 @@ public class MainHook implements IXposedHookLoadPackage {
                             Settings.Secure.putInt(
                                     context.getContentResolver(), SCROLL_KEY, 1);
                             registerScrollObserver(context);
-                            XposedBridge.log(TAG + ": onCreate: forced scroll=1, observer registered");
+                            // 读取防压暗开关初值（进程重启后恢复上次状态）
+                            sAntiDarkenEnabled = Settings.Secure.getInt(
+                                    context.getContentResolver(), ANTI_DARKEN_KEY, 0) == 1;
+                            registerAntiDarkenReceiver(context);
+                            XposedBridge.log(TAG + ": onCreate: forced scroll=1, antiDarken=" + sAntiDarkenEnabled);
                         }
                     }
             );
             XposedBridge.log(TAG + ": Hook MiWallpaperApplication.onCreate OK");
         } catch (Throwable t) {
             XposedBridge.log(TAG + ": Hook MiWallpaperApplication.onCreate failed: " + t);
+        }
+
+        // 壁纸压暗 hook：勾选"防压暗"时才阻止 getIsDarkWallpaperColor 返回 true
+        // 使 shader 的 uDarken=0，transformColor 压暗失效，壁纸保持原色。
+        try {
+            XposedHelpers.findAndHookMethod(
+                    "com.miui.miwallpaper.manager.WallpaperServiceController",
+                    lpparam.classLoader,
+                    "getIsDarkWallpaperColor",
+                    int.class,
+                    new XC_MethodReplacement() {
+                        @Override
+                        protected Object replaceHookedMethod(MethodHookParam param) throws Throwable {
+                            if (!sAntiDarkenEnabled) {
+                                return XposedBridge.invokeOriginalMethod(param.method, param.thisObject, param.args);
+                            }
+                            XposedBridge.log(TAG + ": getIsDarkWallpaperColor -> false");
+                            return false;
+                        }
+                    }
+            );
+            XposedBridge.log(TAG + ": Hook getIsDarkWallpaperColor OK");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + ": Hook getIsDarkWallpaperColor failed: " + t);
+        }
+
+        // 壁纸压暗 hook：勾选"防压暗"时才阻止 getWallpaperIsDark 返回 true
+        try {
+            XposedHelpers.findAndHookMethod(
+                    "com.miui.miwallpaper.manager.WallpaperServiceController",
+                    lpparam.classLoader,
+                    "getWallpaperIsDark",
+                    int.class,
+                    new XC_MethodReplacement() {
+                        @Override
+                        protected Object replaceHookedMethod(MethodHookParam param) throws Throwable {
+                            if (!sAntiDarkenEnabled) {
+                                return XposedBridge.invokeOriginalMethod(param.method, param.thisObject, param.args);
+                            }
+                            XposedBridge.log(TAG + ": getWallpaperIsDark -> false");
+                            return false;
+                        }
+                    }
+            );
+            XposedBridge.log(TAG + ": Hook getWallpaperIsDark OK");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + ": Hook getWallpaperIsDark failed: " + t);
+        }
+
+        // 壁纸压暗 hook：AnimImageGLProgram.updateMaskLayerStatus(boolean, boolean)
+        // 桌面/锁屏渲染都汇聚到这里，勾选"防压暗"时强制两参为 false（uDarken=0, uDarkMode=0），
+        // 使 shader 恒走 fragColor = rgba 输出原色，一次 hook 全覆盖。
+        try {
+            XposedHelpers.findAndHookMethod(
+                    "com.miui.miwallpaper.opengl.ordinary.AnimImageGLProgram",
+                    lpparam.classLoader,
+                    "updateMaskLayerStatus",
+                    boolean.class, boolean.class,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                            if (sAntiDarkenEnabled) {
+                                XposedBridge.log(TAG + ": updateMaskLayerStatus -> false, false");
+                                param.args[0] = false;
+                                param.args[1] = false;
+                            }
+                        }
+                    }
+            );
+            XposedBridge.log(TAG + ": Hook AnimImageGLProgram.updateMaskLayerStatus OK");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + ": Hook AnimImageGLProgram.updateMaskLayerStatus failed: " + t);
         }
 
         // 强制桌面壁纸在锁屏上可见，使同图壁纸时锁屏跟随桌面滚动
@@ -245,6 +331,33 @@ public class MainHook implements IXposedHookLoadPackage {
             XposedBridge.log(TAG + ": Hook setDesktopWallpaperShowWhenLocked OK");
         } catch (Throwable t) {
             XposedBridge.log(TAG + ": Hook setDesktopWallpaperShowWhenLocked failed: " + t);
+        }
+    }
+
+    // ================================================================
+    // 防压暗开关：接收 setter app 的勾选状态，更新内存开关并持久化
+    // ================================================================
+    private void registerAntiDarkenReceiver(final Context context) {
+        try {
+            IntentFilter filter = new IntentFilter(ACTION_UPDATE_ANTI_DARKEN);
+            BroadcastReceiver receiver = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context ctx, Intent intent) {
+                    boolean enabled = intent.getBooleanExtra("enabled", false);
+                    sAntiDarkenEnabled = enabled;
+                    Settings.Secure.putInt(
+                            context.getContentResolver(), ANTI_DARKEN_KEY, enabled ? 1 : 0);
+                    XposedBridge.log(TAG + ": antiDarken updated -> " + enabled);
+                }
+            };
+            if (Build.VERSION.SDK_INT >= 33) {
+                context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
+            } else {
+                context.registerReceiver(receiver, filter);
+            }
+            XposedBridge.log(TAG + ": registerAntiDarkenReceiver OK");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + ": registerAntiDarkenReceiver failed: " + t);
         }
     }
 

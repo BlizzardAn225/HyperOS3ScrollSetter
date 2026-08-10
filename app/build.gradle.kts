@@ -19,8 +19,8 @@ android {
         applicationId = "com.blizzard225.wallpapersetter"
         minSdk = 29
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.4.2"
+        versionCode = 1501
+        versionName = "1.5.0"
     }
 
     buildTypes {

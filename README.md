@@ -84,6 +84,16 @@ When applying a wallpaper, even without scaling, the "Lock screen editor" crops 
 1. **Hook `setDesktopWallpaperShowWhenLocked()`** — Force the parameter to `true`: When `MiuiKeyguardWallpaperWindowController` calls `setDesktopWallpaperShowWhenLocked(false)`, the hook changes it to `true`, ensuring the home screen wallpaper Surface is always visible on the lock screen. Combined with the wallpaper app's own same-image detection mechanism (`isSameImageWallpaper()` → `hideKeyguardWallpaper()` → keyguard alpha=0), the lock screen directly displays the home screen Surface with the scroll offset.
 2. The remaining hooks (`isOs3AtLeast`, `checkWallpaperScroll`, size calculation, and cropping interception) are shared with the home screen scrolling implementation above, ensuring scroll=1 is not reset and wallpapers are not cropped.
 
+#### Don't Darken Wallpaper
+
+**No Root + Shizuku:**  
+After enabling "Don't Darken Wallpaper", perform the inverse operation of `transformColor` on the bitmap before writing, and pre-brighten each pixel according to the shader algorithm, so that after the system darkens it, the original image is approximately restored.
+
+**Root:**  
+1. **Hook `getIsDarkWallpaperColor(int)`** → Always return false  
+2. **Hook `getWallpaperIsDark(int)`** → Always return false  
+3. **Hook `AnimImageGLProgram.updateMaskLayerStatus(boolean, boolean)`** → Force both parameters to false (the only convergence point for home/lock screen rendering; uDarken=0, uDarkMode=0, shader always outputs original colors)
+
 ### Significance
 
 **HyperOS 3 still supports the scrolling wallpaper feature**. This app bypasses the official wallpaper setting pathway, directly setting the wallpaper and enabling scrolling. The original WallpaperScrollFix module intercepted all wallpaper cropping logic, making it impossible to directly set lock screen wallpaper scaling. Moreover, since the "Lock Screen Edit" app applies both desktop and lock screen wallpapers simultaneously, **disabling the module to set a lock screen wallpaper would overwrite the uncropped desktop wallpaper; re-setting the desktop wallpaper would overwrite the cropped lock screen wallpaper**. This forced users to manually crop in the gallery, which was too cumbersome. This app incorporates the interception functionality of the WallpaperScrollFix module and adds the ability to bypass the "Lock Screen Edit" app, directly crop the wallpaper, and pass parameters to "Wallpaper & Personalization" to set both desktop and lock screen wallpapers.
@@ -101,6 +111,7 @@ When applying a wallpaper, even without scaling, the "Lock screen editor" crops 
 2. Restart the "Wallpaper" app (if "Lock Screen Edit" or "Wallpaper & Personalization" is running, it is recommended to restart them as well);
 3. Set lock screen/desktop wallpaper through the app, or use the original setting method.
     > If you experience a brief black screen on the home screen after rebooting, manually force-stop the "Wallpaper" app once in Settings.
+4. After enabling "Don't Darken Wallpaper", the "Wallpaper" app needs to be restarted once.
 
 ### Building from Source
 
@@ -202,14 +213,24 @@ Root：
 
 #### 开启锁屏壁纸随桌面滚动
 
-**免Root + Shizuku：**
+免Root + Shizuku：
 1. **`WallpaperManager.setBitmap()` 同时设置** — 勾选"同时应用锁屏壁纸"后，使用 `FLAG_SYSTEM | FLAG_LOCK` 将同一张裁切后的位图同时写入桌面和锁屏，绕过"锁屏编辑"的裁切和同时设置逻辑；
 2. 壁纸应用检测到桌面和锁屏使用相同图片 → 隐藏锁屏 Surface（alpha=0）→ 桌面 Surface 因 scroll=1 而宽于屏幕 → Framework 跟踪滚动位置 → 锁屏直接显示桌面 Surface 的当前滚动位置。
 
-**Root：**
+Root：
 1. **Hook `setDesktopWallpaperShowWhenLocked()`** — 强制参数为 `true`：当 `MiuiKeyguardWallpaperWindowController` 调用 `setDesktopWallpaperShowWhenLocked(false)` 时，hook 将其改为 `true`，确保桌面壁纸的 Surface 始终在锁屏上可见。配合壁纸应用自身的同图检测机制（`isSameImageWallpaper()` → `hideKeyguardWallpaper()` → keyguard alpha=0），锁屏直接显示带有滚动偏移的桌面 Surface；
 2. 其余 hook（`isOs3AtLeast`、`checkWallpaperScroll`、尺寸计算、裁切拦截）与上述桌面随屏滚动共用，确保 scroll=1 不被重置、壁纸不被裁切。
 
+#### 不压暗壁纸
+
+免Root + Shizuku：
+
+勾选"不压暗壁纸"后，写入前对位图做 `transformColor` 的逆运算，按 `shader` 算法逐像素预先提亮，使系统压暗后，近似还原为原图。
+
+Root：
+1. **Hook `getIsDarkWallpaperColor(int)`** → 恒返回 false
+2. **Hook `getWallpaperIsDark(int)`** → 恒返回 false
+3. **Hook `AnimImageGLProgram.updateMaskLayerStatus(boolean, boolean)`** → 强制两参 false（桌面/锁屏渲染唯一汇聚点，uDarken=0、uDarkMode=0，shader 恒输出原色）
 
 ### 意义
 
@@ -226,8 +247,9 @@ Root：
 Root：
 1. 激活模块；
 2. 重启“壁纸”APP（若“锁屏编辑”APP、“壁纸与个性化”APP在运行，最好一并重启）；
-3. 进入软件设置锁屏/桌面壁纸，或使用原本的设置方式。
+3. 进入软件设置锁屏/桌面壁纸，或使用原本的设置方式；
     >若重启后进入桌面时，桌面壁纸出现短暂黑屏，请在设置中手动结束一次“壁纸”APP的进程。
+4. 勾选“不压暗壁纸”后，需要重启一次“壁纸”APP。
 
 ### 从源码构建
 
