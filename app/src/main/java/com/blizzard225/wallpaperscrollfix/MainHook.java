@@ -9,11 +9,13 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.database.ContentObserver;
 import android.graphics.Bitmap;
+import android.graphics.Rect;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.util.Size;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -43,13 +45,32 @@ public class MainHook implements IXposedHookLoadPackage {
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) {
         if (WALLPAPER_PKG.equals(lpparam.packageName)) {
-            hookWallpaperPkg(lpparam);
+            if (isOs4Host(lpparam.classLoader)) {
+                hookWallpaperPkgOs4(lpparam);
+            } else {
+                hookWallpaperPkg(lpparam);
+            }
         } else if (THEME_PKG.equals(lpparam.packageName)) {
             hookThemePkg(lpparam);
         } else if (AOD_PKG.equals(lpparam.packageName)) {
             hookAodApp(lpparam);
         } else if (SETTER_PKG.equals(lpparam.packageName)) {
             hookSetterApp(lpparam);
+        }
+    }
+
+    // ================================================================
+    // 宿主系统识别：HyperOS4 的 WallpaperUtils 含 a()，HyperOS3 只有
+    // needResponseConfigChange()，以此区分两套壁纸 APP 的执行逻辑
+    // ================================================================
+    private boolean isOs4Host(ClassLoader classLoader) {
+        try {
+            Class<?> wallpaperUtils = XposedHelpers.findClass(
+                    "com.miui.miwallpaper.utils.WallpaperUtils", classLoader);
+            wallpaperUtils.getDeclaredMethod("a");
+            return true;
+        } catch (Throwable t) {
+            return false;
         }
     }
 
@@ -401,6 +422,221 @@ public class MainHook implements IXposedHookLoadPackage {
             nm.notify(1001, notification);
         } catch (Throwable t) {
             XposedBridge.log(TAG + ": notification failed: " + t);
+        }
+    }
+
+    // ================================================================
+    // wallpaperOS4 Hook（宿主设备=HyperOS4）
+    // OS3 的部分 hook 目标在 OS4 中失效（isOs3AtLeast / checkWallpaperScroll /
+    // setDesktopWallpaperShowWhenLocked），整套替换为：
+    //   1. MiWallpaperApplication.onCreate：强制 scroll=1 + ContentObserver 写回，
+    //      保证随屏滚动开关常开；
+    //   2. SystemSettingUtils.x(int)：吞掉写 0，阻止随屏滚动被关闭
+    //      （含 onWallpaperFileChanged 的强制重置路径）；
+    //   3. reportSurfaceSize（桌面+锁屏渲染器）：去除 OS4 新增的 fMax≤1 钳制。
+    //      该钳制使位图不被放大覆盖屏幕，随屏滚动下 surface = (1.1×屏宽, 位图原始高)，
+    //      宽高比偏离位图 → GL cover 矩阵将壁纸纵向居中裁到 位图宽/(1.1×屏宽)；
+    //   4. 防压暗（见 hookOs4AntiDarken）。
+    // ================================================================
+    private void hookWallpaperPkgOs4(XC_LoadPackage.LoadPackageParam lpparam) {
+        XposedBridge.log(TAG + ": hooked into " + WALLPAPER_PKG + " (HyperOS4 host)");
+
+        try {
+            XposedHelpers.findAndHookMethod(
+                    "com.miui.miwallpaper.MiWallpaperApplication",
+                    lpparam.classLoader,
+                    "onCreate",
+                    new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            Context context = (Context) param.thisObject;
+                            Settings.Secure.putInt(
+                                    context.getContentResolver(), SCROLL_KEY, 1);
+                            registerScrollObserver(context);
+                            // 防压暗开关：读取持久化状态并接收 APP 广播（与 OS3 同一套机制）
+                            sAntiDarkenEnabled = Settings.Secure.getInt(
+                                    context.getContentResolver(), ANTI_DARKEN_KEY, 0) == 1;
+                            registerAntiDarkenReceiver(context);
+                            XposedBridge.log(TAG + "[OS4]: onCreate: forced scroll=1, antiDarken="
+                                    + sAntiDarkenEnabled);
+                        }
+                    }
+            );
+            XposedBridge.log(TAG + "[OS4]: Hook MiWallpaperApplication.onCreate OK");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "[OS4]: Hook MiWallpaperApplication.onCreate failed: " + t);
+        }
+
+        // 随屏滚动保活：吞掉 SystemSettingUtils.x(0)（x(1) 等其余写入不受影响）
+        try {
+            XposedHelpers.findAndHookMethod(
+                    "com.miui.miwallpaper.utils.SystemSettingUtils",
+                    lpparam.classLoader,
+                    "x",
+                    int.class,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            if ((int) param.args[0] == 0) {
+                                XposedBridge.log(TAG + "[OS4]: blocked SystemSettingUtils.x(0)");
+                                param.setResult(null);
+                            }
+                        }
+                    }
+            );
+            XposedBridge.log(TAG + "[OS4]: Hook SystemSettingUtils.x guard OK");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "[OS4]: Hook SystemSettingUtils.x guard failed: " + t);
+        }
+
+        hookOs4ReportSurfaceSize(lpparam,
+                "com.miui.miwallpaper.container.openGL.DesktopAnimImageWallpaperRenderer", true);
+        hookOs4ReportSurfaceSize(lpparam,
+                "com.miui.miwallpaper.container.openGL.KeyguardAnimImageWallpaperRenderer", false);
+        hookOs4AntiDarken(lpparam);
+    }
+
+    // ================================================================
+    // OS4 防压暗。两代 anim_fragment_shader.glsl 逐字节一致，压暗语义不变：
+    //   uDarkMode（遮罩，来源 WallpaperServiceController.E(int)）在 OS4 被
+    //     B() = f2269c && !SystemBuildUtil.f() 上游恒短路（f()=HyperOS≥1 恒真），无需 hook；
+    //   uDarken（压暗主因，来源 WallpaperServiceController.m(int)，其缓存由 t(int) 计算，
+    //     依据 WallpaperColors 的暗色 hint）在 OS4 仍可能为 1，需要 hook。
+    // OS3 → OS4 目标对应关系：
+    //   getIsDarkWallpaperColor(int) → m(int)
+    //   getWallpaperIsDark(int)      → t(int)
+    //   AnimImageGLProgram.updateMaskLayerStatus(boolean,boolean) → 同名同签名，保留
+    // ================================================================
+    private void hookOs4AntiDarken(XC_LoadPackage.LoadPackageParam lpparam) {
+        try {
+            XposedHelpers.findAndHookMethod(
+                    "com.miui.miwallpaper.manager.WallpaperServiceController",
+                    lpparam.classLoader,
+                    "m",
+                    int.class,
+                    new XC_MethodReplacement() {
+                        @Override
+                        protected Object replaceHookedMethod(MethodHookParam param) throws Throwable {
+                            if (!sAntiDarkenEnabled) {
+                                return XposedBridge.invokeOriginalMethod(param.method, param.thisObject, param.args);
+                            }
+                            return false;
+                        }
+                    }
+            );
+            XposedBridge.log(TAG + "[OS4]: Hook WallpaperServiceController.m(int) OK");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "[OS4]: Hook WallpaperServiceController.m(int) failed: " + t);
+        }
+
+        try {
+            XposedHelpers.findAndHookMethod(
+                    "com.miui.miwallpaper.manager.WallpaperServiceController",
+                    lpparam.classLoader,
+                    "t",
+                    int.class,
+                    new XC_MethodReplacement() {
+                        @Override
+                        protected Object replaceHookedMethod(MethodHookParam param) throws Throwable {
+                            if (!sAntiDarkenEnabled) {
+                                return XposedBridge.invokeOriginalMethod(param.method, param.thisObject, param.args);
+                            }
+                            return Boolean.FALSE;
+                        }
+                    }
+            );
+            XposedBridge.log(TAG + "[OS4]: Hook WallpaperServiceController.t(int) OK");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "[OS4]: Hook WallpaperServiceController.t(int) failed: " + t);
+        }
+
+        // 汇聚点：桌面/锁屏渲染统一入口，勾选防压暗时强制 uDarkMode=0、uDarken=0（与 OS3 相同）
+        try {
+            XposedHelpers.findAndHookMethod(
+                    "com.miui.miwallpaper.opengl.ordinary.AnimImageGLProgram",
+                    lpparam.classLoader,
+                    "updateMaskLayerStatus",
+                    boolean.class, boolean.class,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            if (sAntiDarkenEnabled) {
+                                XposedBridge.log(TAG + "[OS4]: updateMaskLayerStatus -> false, false");
+                                param.args[0] = false;
+                                param.args[1] = false;
+                            }
+                        }
+                    }
+            );
+            XposedBridge.log(TAG + "[OS4]: Hook AnimImageGLProgram.updateMaskLayerStatus OK");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "[OS4]: Hook AnimImageGLProgram.updateMaskLayerStatus failed: " + t);
+        }
+    }
+
+    // 用 OS3 的无钳制公式替换 reportSurfaceSize：
+    //   fMax = max(screenW/bw, screenH/bh)（不钳到 1），surface = 位图 cover 尺寸；
+    //   随屏滚动下仅当位图等比宽度不足 1.1×屏宽时才扩展到 1.1×屏宽（与 OS3 行为一致）。
+    // WallpaperUtils.a()==true 的分支（部分机型/形态）本身无钳制，走原逻辑。
+    private void hookOs4ReportSurfaceSize(XC_LoadPackage.LoadPackageParam lpparam,
+                                          String className, final boolean desktop) {
+        try {
+            XposedHelpers.findAndHookMethod(className, lpparam.classLoader,
+                    "reportSurfaceSize", new XC_MethodReplacement() {
+                        @Override
+                        protected Object replaceHookedMethod(MethodHookParam param) throws Throwable {
+                            Object renderer = param.thisObject;
+                            ClassLoader cl = renderer.getClass().getClassLoader();
+                            Class<?> wallpaperUtils = XposedHelpers.findClass(
+                                    "com.miui.miwallpaper.utils.WallpaperUtils", cl);
+                            if (XposedHelpers.callStaticMethod(wallpaperUtils, "a") == Boolean.TRUE) {
+                                return XposedBridge.invokeOriginalMethod(param.method, renderer, param.args);
+                            }
+                            Context context = (Context) XposedHelpers.getObjectField(renderer, "mContext");
+                            Rect screen = (Rect) XposedHelpers.callStaticMethod(
+                                    XposedHelpers.findClass("com.miui.miwallpaper.utils.ScreenUtils", cl),
+                                    "a", context);
+                            Object texture = XposedHelpers.getObjectField(renderer, "mTexture");
+                            XposedHelpers.callMethod(texture, "use",
+                                    new Class[]{java.util.function.Consumer.class}, new Object[]{null});
+                            Rect dims = (Rect) XposedHelpers.callMethod(texture, "getTextureDimensions");
+                            Rect surface = (Rect) XposedHelpers.getObjectField(renderer, "mSurfaceSize");
+                            surface.set(screen);
+                            int screenW = surface.width();
+                            int screenH = surface.height();
+                            boolean scroll = desktop && isOs4ScrollEnabled(renderer, cl);
+                            // OS3 公式：fMax 不钳制
+                            float scale = Math.max(screenW / (float) dims.width(),
+                                    screenH / (float) dims.height());
+                            int width2 = (int) ((dims.width() * scale) + 0.5f);
+                            int height2 = (int) ((dims.height() * scale) + 0.5f);
+                            int targetW = (!scroll || ((double) width2) >= ((double) screenW) * 1.1d)
+                                    ? width2 : (int) (screenW * 1.1f);
+                            surface.set(0, 0, targetW, height2);
+                            XposedBridge.log(TAG + "[OS4]: reportSurfaceSize(unclamped) bitmap="
+                                    + dims.width() + "x" + dims.height() + " screen=" + screenW
+                                    + "x" + screenH + " scroll=" + scroll + " -> " + targetW + "x" + height2);
+                            return new Size(targetW, height2);
+                        }
+                    });
+            XposedBridge.log(TAG + "[OS4]: Hook reportSurfaceSize OK: " + className);
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "[OS4]: Hook reportSurfaceSize failed (" + className + "): " + t);
+        }
+    }
+
+    // 桌面渲染器的滚动开关：优先读引擎自身的标志位（混淆后运行时字段名为 "d"），失败则回落设置值
+    private boolean isOs4ScrollEnabled(Object renderer, ClassLoader classLoader) {
+        try {
+            return XposedHelpers.getBooleanField(renderer, "d");
+        } catch (Throwable t) {
+            try {
+                return XposedHelpers.callStaticMethod(
+                        XposedHelpers.findClass("com.miui.miwallpaper.utils.SystemSettingUtils",
+                                classLoader), "p") == Boolean.TRUE;
+            } catch (Throwable t2) {
+                return false;
+            }
         }
     }
 
