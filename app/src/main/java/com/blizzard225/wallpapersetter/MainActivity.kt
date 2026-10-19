@@ -1,17 +1,12 @@
 package com.blizzard225.wallpapersetter
 
-import android.app.WallpaperManager
 import android.content.BroadcastReceiver
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
@@ -22,15 +17,18 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
+import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
+import com.google.android.material.color.DynamicColors
 import com.google.android.material.textfield.TextInputEditText
 import rikka.shizuku.Shizuku
-import android.content.pm.PackageManager
-import android.text.TextWatcher
-import com.google.android.material.checkbox.MaterialCheckBox
-import com.google.android.material.color.DynamicColors
 
+/**
+ * 主界面：壁纸裁剪/设置 + 模块状态 + 宿主设备 + 随屏滚动/壁纸缩放命令卡片。
+ * 命令执行见 [WallpaperCommands]/[ShizukuRunner]，位图处理见 [WallpaperBitmap]/
+ * [AntiDarkenCompensator]，宿主设备配置见 [HostSystemConfig]。
+ */
 class MainActivity : AppCompatActivity() {
 
     private var originalBitmap: Bitmap? = null
@@ -41,23 +39,7 @@ class MainActivity : AppCompatActivity() {
     private var moduleActive = false
     private var shizukuInitialized = false
 
-    // 宿主设备：hostSystem 0=未选择，3=HyperOS3，4=HyperOS4
-    // deviceType 0=未选择，1=手机，2=平板（仅 HyperOS4 + Shizuku 生效）
-    private var hostSystem = 0
-    private var deviceType = 0
-    private var tabletPreset = true
-    private var tabletResW = 3200
-    private var tabletResH = 2136
-    private var updatingHostUi = false
-    private var updatingDeviceUi = false
-    private val DEVICE_PHONE = 1
-    private val DEVICE_TABLET = 2
-    private val HOST_PREFS = "wallpaper_host_prefs"
-    private val HOST_KEY = "host_system"
-    private val DEVICE_KEY = "device_type"
-    private val TABLET_PRESET_KEY = "tablet_res_preset"
-    private val TABLET_RES_W_KEY = "tablet_res_w"
-    private val TABLET_RES_H_KEY = "tablet_res_h"
+    private lateinit var hostConfig: HostSystemConfig
 
     private val SHIZUKU_PERMISSION_REQUEST_CODE = 1001
     private val ANTI_DARKEN_PREFS = "wallpaper_anti_darken_prefs"
@@ -78,11 +60,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var moduleStatusText: TextView
     private lateinit var cbApplyBoth: MaterialCheckBox
     private lateinit var cbAntiDarken: MaterialCheckBox
+    private lateinit var jitterCard: View
+    private lateinit var btnZoomOff: MaterialButton
+    private lateinit var btnZoomOn: MaterialButton
 
     private val imagePicker =
         registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
             uri?.let {
-                val bitmap = decodeUri(it)
+                val bitmap = WallpaperBitmap.decodeUri(this, it)
                 if (bitmap != null) {
                     originalBitmap = bitmap
                     cropImageView.setImageBitmap(bitmap)
@@ -115,9 +100,14 @@ class MainActivity : AppCompatActivity() {
         moduleStatusText = findViewById(R.id.moduleStatusText)
         cbApplyBoth = findViewById(R.id.cbApplyBoth)
         cbAntiDarken = findViewById(R.id.cbAntiDarken)
+        jitterCard = findViewById(R.id.jitterCard)
+        btnZoomOff = findViewById(R.id.btnZoomOff)
+        btnZoomOn = findViewById(R.id.btnZoomOn)
+
+        hostConfig = HostSystemConfig(this) { moduleActive }
 
         checkModuleStatus()
-        setupHostSystemUi()
+        hostConfig.setup()
         setupAntiDarkenCheckbox()
 
         btnPick.setOnClickListener {
@@ -214,6 +204,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ===================== Shizuku / 模块状态 =====================
+
     private fun initShizuku() {
         if (shizukuInitialized) return
         shizukuInitialized = true
@@ -257,40 +249,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-    private fun updateButtonState() {
-        val btn = findViewById<MaterialButton>(R.id.btnCopyCommand)
-
-        if (moduleActive) {
-            btn.text = "无需手动设置"
-            btn.isEnabled = false
-            btn.alpha = 0.5f
-            btn.setOnClickListener { }
-            return
-        }
-
-        btn.isEnabled = true
-        btn.alpha = 1.0f
-
-        if (shizukuPermissionGranted) {
-            btn.text = "开启随屏滚动"
-
-            btn.setOnClickListener {
-                enableScroll()
-            }
-        } else {
-            btn.text = "复制命令"
-
-            btn.setOnClickListener {
-                copyCommandToClipboard()
-            }
-        }
-    }
-
     private fun checkModuleStatus() {
         moduleActive = ModuleStatus.isActive
         updateModuleStatusCard()
         updateAntiDarkenLabel()
-        applyHostVisibility()
+        hostConfig.applyVisibility()
         if (!moduleActive) {
             initShizuku()
         }
@@ -319,8 +282,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun isShizukuAvailable(): Boolean {
         return try {
+            // 直接以 pingBinder 的结果为准（旧写法忽略返回值，Shizuku 已死时也判为可用）
             Shizuku.pingBinder()
-            true
         } catch (_: Exception) {
             false
         }
@@ -349,152 +312,94 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun enableScroll() {
-        Toast.makeText(this, "正在执行，请稍候...", Toast.LENGTH_SHORT).show()
+    // ===================== 命令卡片（随屏滚动 / 应对壁纸抖动） =====================
 
-        Thread {
-            try {
-                val startTime = System.currentTimeMillis()
-                var killed = false
-
-                while (true) {
-                    val elapsed = System.currentTimeMillis() - startTime
-
-                    // 执行 settings put
-                    runShizukuCommand("settings", "put", "secure",
-                        "pref_key_wallpaper_screen_scrolled_span", "1")
-
-                    // 约1秒后杀进程（给settings put一点时间先写入）
-                    if (!killed && elapsed >= 1000) {
-                        runShizukuCommand("am", "force-stop", "com.miui.miwallpaper")
-                        killed = true
-                    }
-
-                    // 杀进程3秒后停止循环
-                    if (killed && elapsed >= 4000) {
-                        break
-                    }
-
-                    Thread.sleep(500)
-                }
-
-                runOnUiThread {
-                    Toast.makeText(this, "随屏滚动已开启", Toast.LENGTH_LONG).show()
-                }
-
-            } catch (e: Exception) {
-                runOnUiThread {
-                    Toast.makeText(this, "执行异常：${e.message}", Toast.LENGTH_LONG).show()
-                }
-            }
-        }.start()
+    /**
+     * Shizuku 掉线/丢权限的统一反馈：状态卡片转"未激活"并提示。
+     * 前置检查发现掉线、或命令执行中掉线（exec 返回 -1）都会走这里。
+     */
+    private fun onShizukuBroken() {
+        shizukuAvailable = false
+        shizukuPermissionGranted = false
+        updateModuleStatusCard()
+        Toast.makeText(this, "执行失败，检查Shizuku是否正常工作", Toast.LENGTH_LONG).show()
     }
 
-    private fun runShizukuCommand(vararg args: String): Int {
-        return try {
-            val clazz = Class.forName("rikka.shizuku.Shizuku")
-            val method = clazz.getDeclaredMethod(
-                "newProcess",
-                Array<String>::class.java,
-                Array<String>::class.java,
-                String::class.java
-            )
-            method.isAccessible = true
-            val process = method.invoke(null, args, null, null) as Process
-            process.waitFor()
-        } catch (e: Exception) {
-            -1
+    /**
+     * Shizuku 执行前置检查：设备上 Shizuku 服务可能被自动关闭导致本 APP 丢权限。
+     * 检查失败时状态卡片转为"未激活"、toast 提示，不执行命令；
+     * Shizuku 恢复后再次点击即自动恢复执行。
+     */
+    private fun runShizukuAction(action: () -> Unit) {
+        if (!(isShizukuAvailable() && isShizukuPermissionGranted())) {
+            onShizukuBroken()
+            return
+        }
+        shizukuPermissionGranted = true
+        updateModuleStatusCard()
+        action()
+    }
+
+    private fun updateButtonState() {
+        updateZoomCard()
+
+        val btn = findViewById<MaterialButton>(R.id.btnCopyCommand)
+
+        if (moduleActive) {
+            btn.text = "无需手动设置"
+            btn.isEnabled = false
+            btn.alpha = 0.5f
+            btn.setOnClickListener { }
+            return
+        }
+
+        btn.isEnabled = true
+        btn.alpha = 1.0f
+
+        if (shizukuPermissionGranted) {
+            btn.text = "开启随屏滚动"
+
+            btn.setOnClickListener {
+                runShizukuAction { WallpaperCommands.enableScroll(this) { onShizukuBroken() } }
+            }
+        } else {
+            btn.text = "复制命令"
+
+            btn.setOnClickListener {
+                WallpaperCommands.copyScrollCommand(this)
+            }
         }
     }
 
-    private fun shizukuExec(
-        newProcess: java.lang.reflect.Method,
-        command: Array<String>
-    ): Int {
-        val process = newProcess.invoke(null, command, null, null) as Process
-        val exitCode = process.waitFor()
-        process.destroy()
-        return exitCode
-    }
-
-    private fun shizukuGet(
-        newProcess: java.lang.reflect.Method,
-        command: Array<String>
-    ): String {
-        val process = newProcess.invoke(null, command, null, null) as Process
-        val result = process.inputStream.bufferedReader().use { it.readText().trim() }
-        process.waitFor()
-        process.destroy()
-        return result
-    }
-
-    private fun copyCommandToClipboard() {
-
-        val command = """
-            settings put secure pref_key_wallpaper_screen_scrolled_span 1
-        """.trimIndent()
-
-        val clipboard =
-            getSystemService(Context.CLIPBOARD_SERVICE)
-                    as ClipboardManager
-
-        val clip =
-            ClipData.newPlainText("Shizuku 命令", command)
-
-        clipboard.setPrimaryClip(clip)
-
-        Toast.makeText(
-            this,
-            "命令已复制到剪贴板！\n请在 Shizuku 终端中执行。",
-            Toast.LENGTH_LONG
-        ).show()
-    }
-
-    private fun decodeUri(uri: Uri): Bitmap? {
-        return try {
-            contentResolver.openInputStream(uri)?.use { input ->
-                BitmapFactory.decodeStream(input)
+    /**
+     * 应对壁纸抖动卡片：显示逻辑与"随屏滚动"卡片类似。
+     * 模块模式（Framework 已修复缩放/滚动冲突）不显示本卡片；
+     * Shizuku 已授权 → 按钮直接执行命令；未授权 → 按钮复制命令。
+     */
+    private fun updateZoomCard() {
+        if (moduleActive) {
+            jitterCard.visibility = View.GONE
+            return
+        }
+        jitterCard.visibility = View.VISIBLE
+        if (shizukuPermissionGranted) {
+            btnZoomOff.text = "关闭壁纸缩放"
+            btnZoomOn.text = "打开壁纸缩放"
+            btnZoomOff.setOnClickListener {
+                runShizukuAction { WallpaperCommands.setWallpaperZoom(this, false) { onShizukuBroken() } }
             }
-        } catch (e: Exception) {
-            val debugInfo = buildString {
-                appendLine("=== WallpaperSetter 解码失败 ===")
-                appendLine("时间: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())}")
-                appendLine("URI: $uri")
-                appendLine("scheme: ${uri.scheme}")
-                appendLine("authority: ${uri.authority}")
-                appendLine("path: ${uri.path}")
-                appendLine("系统: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
-                appendLine("Android版本: ${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT})")
-                appendLine()
-                appendLine("异常信息: ${e.javaClass.name}: ${e.message}")
-                appendLine()
-                appendLine("堆栈:")
-                appendLine(android.util.Log.getStackTraceString(e))
+            btnZoomOn.setOnClickListener {
+                runShizukuAction { WallpaperCommands.setWallpaperZoom(this, true) { onShizukuBroken() } }
             }
-
-            // 依然保留 Logcat 输出，方便自己本地调试时看
-            android.util.Log.e("WallpaperSetter", "Failed to decode URI: $uri", e)
-
-            // 写入剪贴板
-            try {
-                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                val clip = ClipData.newPlainText("WallpaperSetter Debug Info", debugInfo)
-                clipboard.setPrimaryClip(clip)
-
-                Toast.makeText(
-                    this,
-                    "解码失败: ${e.message}\n详细信息已复制到剪贴板，可反馈给开发者",
-                    Toast.LENGTH_LONG
-                ).show()
-            } catch (clipEx: Exception) {
-                // 极端情况下剪贴板本身也可能不可用，避免二次崩溃
-                android.util.Log.e("WallpaperSetter", "Failed to copy to clipboard", clipEx)
-                Toast.makeText(this, "解码失败: ${e.message}", Toast.LENGTH_LONG).show()
-            }
-
-            null
+        } else {
+            btnZoomOff.text = "复制关闭壁纸缩放命令"
+            btnZoomOn.text = "复制打开壁纸缩放命令"
+            btnZoomOff.setOnClickListener { WallpaperCommands.copyZoomCommand(this, false) }
+            btnZoomOn.setOnClickListener { WallpaperCommands.copyZoomCommand(this, true) }
         }
     }
+
+    // ===================== 壁纸裁剪与设置 =====================
 
     private fun applyCropAndSetWallpaper() {
         if (originalBitmap == null) {
@@ -513,93 +418,11 @@ class MainActivity : AppCompatActivity() {
             val finalBitmap = maybeExpandForOs4(bitmap)
             if (finalBitmap != null) {
                 if (both) {
-                    setWallpaperBoth(finalBitmap)
+                    WallpaperBitmap.setBoth(this, finalBitmap)
                 } else {
-                    setWallpaperStandard(finalBitmap)
+                    WallpaperBitmap.setStandard(this, finalBitmap)
                 }
             }
-        }
-    }
-
-    /**
-     * 若免Root+Shizuku 且勾选了逆运算，则在后台线程对壁纸做逆运算提亮，
-     * 完成后回到主线程回调；模块模式、HyperOS4 或未勾选时直接回调原图。
-     */
-    private fun applyCompensated(bitmap: Bitmap, callback: (Bitmap) -> Unit) {
-        if (!cbAntiDarken.isChecked || moduleActive) {
-            croppedBitmap = bitmap
-            callback(bitmap)
-            return
-        }
-        Toast.makeText(this, "正在逆运算还原壁纸颜色...", Toast.LENGTH_SHORT).show()
-        Thread {
-            val compensated = compensateAntiDarken(bitmap)
-            runOnUiThread {
-                croppedBitmap = compensated
-                callback(compensated)
-            }
-        }.start()
-    }
-
-    private fun setWallpaperBoth(bitmap: Bitmap) {
-        try {
-            val wm = WallpaperManager.getInstance(this)
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                wm.setBitmap(
-                    bitmap,
-                    null,
-                    true,
-                    WallpaperManager.FLAG_SYSTEM or WallpaperManager.FLAG_LOCK
-                )
-            } else {
-                wm.setBitmap(bitmap)
-            }
-
-            Toast.makeText(
-                this,
-                "桌面 + 锁屏壁纸已设置",
-                Toast.LENGTH_LONG
-            ).show()
-
-        } catch (e: Exception) {
-
-            Toast.makeText(
-                this,
-                "设置失败: ${e.message}",
-                Toast.LENGTH_LONG
-            ).show()
-        }
-    }
-
-    private fun setWallpaperStandard(bitmap: Bitmap) {
-        try {
-            val wm = WallpaperManager.getInstance(this)
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                wm.setBitmap(
-                    bitmap,
-                    null,
-                    true,
-                    WallpaperManager.FLAG_SYSTEM
-                )
-            } else {
-                wm.setBitmap(bitmap)
-            }
-
-            Toast.makeText(
-                this,
-                "桌面壁纸已设置",
-                Toast.LENGTH_LONG
-            ).show()
-
-        } catch (e: Exception) {
-
-            Toast.makeText(
-                this,
-                "设置失败: ${e.message}",
-                Toast.LENGTH_LONG
-            ).show()
         }
     }
 
@@ -618,263 +441,59 @@ class MainActivity : AppCompatActivity() {
         applyCompensated(cropped) { bitmap ->
             val finalBitmap = maybeExpandForOs4(bitmap)
             if (finalBitmap != null) {
-                setWallpaperLock(finalBitmap)
+                WallpaperBitmap.setLock(this, finalBitmap)
             }
-        }
-    }
-
-    private fun setWallpaperLock(bitmap: Bitmap) {
-        try {
-            val wm = WallpaperManager.getInstance(this)
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                wm.setBitmap(
-                    bitmap,
-                    null,
-                    true,
-                    WallpaperManager.FLAG_LOCK
-                )
-            } else {
-                wm.setBitmap(bitmap)
-            }
-
-            Toast.makeText(
-                this,
-                "锁屏壁纸已设置",
-                Toast.LENGTH_LONG
-            ).show()
-
-        } catch (e: Exception) {
-
-            Toast.makeText(
-                this,
-                "设置失败: ${e.message}",
-                Toast.LENGTH_LONG
-            ).show()
         }
     }
 
     /**
-     * 宿主设备卡片：HyperOS3 / HyperOS4 互斥勾选，初次安装无勾选。
-     * 模块模式：勾选/变更后提示需要重启壁纸APP（模块按宿主版本应用对应 Hook 逻辑）；
-     * Shizuku 模式：勾选后立即生效。
-     * HyperOS4 下展开设备类型（平板/手机）：
-     *   手机 → Shizuku 不执行逆运算扩展；平板 → 需勾选预设分辨率 3200×2136 或输入分辨率。
+     * 若免Root+Shizuku 且勾选了逆运算，则在后台线程对壁纸做逆运算提亮，
+     * 完成后回到主线程回调；模块模式、HyperOS4 或未勾选时直接回调原图。
      */
-    private fun setupHostSystemUi() {
-        // 防御：若当前布局变体缺少宿主设备卡片则跳过，避免 findViewById 空指针
-        if (findViewById<View?>(R.id.hostSystemCard) == null) return
-        val cbHostOs3 = findViewById<MaterialCheckBox>(R.id.cbHostOs3)
-        val cbHostOs4 = findViewById<MaterialCheckBox>(R.id.cbHostOs4)
-        val cbDevicePhone = findViewById<MaterialCheckBox>(R.id.cbDevicePhone)
-        val cbDeviceTablet = findViewById<MaterialCheckBox>(R.id.cbDeviceTablet)
-        val cbResPreset = findViewById<MaterialCheckBox>(R.id.cbResPreset)
-        val editResWidth = findViewById<TextInputEditText>(R.id.editResWidth)
-        val editResHeight = findViewById<TextInputEditText>(R.id.editResHeight)
-
-        val prefs = getSharedPreferences(HOST_PREFS, Context.MODE_PRIVATE)
-        hostSystem = try {
-            prefs.getInt(HOST_KEY, 0)
-        } catch (e: Exception) {
-            0
-        }
-        deviceType = try {
-            prefs.getInt(DEVICE_KEY, 0)
-        } catch (e: Exception) {
-            0
-        }
-        tabletPreset = try {
-            prefs.getBoolean(TABLET_PRESET_KEY, true)
-        } catch (e: Exception) {
-            true
-        }
-        tabletResW = try {
-            prefs.getInt(TABLET_RES_W_KEY, 3200)
-        } catch (e: Exception) {
-            3200
-        }
-        tabletResH = try {
-            prefs.getInt(TABLET_RES_H_KEY, 2136)
-        } catch (e: Exception) {
-            2136
-        }
-
-        updatingHostUi = true
-        cbHostOs3.isChecked = hostSystem == 3
-        cbHostOs4.isChecked = hostSystem == 4
-        updatingHostUi = false
-        updatingDeviceUi = true
-        cbDevicePhone.isChecked = deviceType == DEVICE_PHONE
-        cbDeviceTablet.isChecked = deviceType == DEVICE_TABLET
-        cbResPreset.isChecked = tabletPreset
-        updatingDeviceUi = false
-        if (editResWidth.text.isNullOrBlank()) editResWidth.setText(tabletResW.toString())
-        if (editResHeight.text.isNullOrBlank()) editResHeight.setText(tabletResH.toString())
-        applyHostVisibility()
-
-        cbHostOs3.setOnCheckedChangeListener { _, isChecked ->
-            if (updatingHostUi) return@setOnCheckedChangeListener
-            setHostSystem(if (isChecked) 3 else 0)
-        }
-        cbHostOs4.setOnCheckedChangeListener { _, isChecked ->
-            if (updatingHostUi) return@setOnCheckedChangeListener
-            setHostSystem(if (isChecked) 4 else 0)
-        }
-        cbDevicePhone.setOnCheckedChangeListener { _, isChecked ->
-            if (updatingDeviceUi) return@setOnCheckedChangeListener
-            setDeviceType(if (isChecked) DEVICE_PHONE else 0)
-        }
-        cbDeviceTablet.setOnCheckedChangeListener { _, isChecked ->
-            if (updatingDeviceUi) return@setOnCheckedChangeListener
-            setDeviceType(if (isChecked) DEVICE_TABLET else 0)
-        }
-        cbResPreset.setOnCheckedChangeListener { _, isChecked ->
-            if (updatingDeviceUi) return@setOnCheckedChangeListener
-            tabletPreset = isChecked
-            prefs.edit().putBoolean(TABLET_PRESET_KEY, isChecked).apply()
-            applyHostVisibility()
-        }
-        editResWidth.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-            override fun afterTextChanged(s: android.text.Editable?) {
-                val v = s?.toString()?.toIntOrNull() ?: return
-                tabletResW = v
-                prefs.edit().putInt(TABLET_RES_W_KEY, v).apply()
-            }
-        })
-        editResHeight.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-            override fun afterTextChanged(s: android.text.Editable?) {
-                val v = s?.toString()?.toIntOrNull() ?: return
-                tabletResH = v
-                prefs.edit().putInt(TABLET_RES_H_KEY, v).apply()
-            }
-        })
-    }
-
-    private fun applyHostVisibility() {
-        // 设备类型/分辨率子选项仅在 HyperOS4 + Shizuku 免Root 模式下显示（模块模式不显示）
-        findViewById<View?>(R.id.os4OptionsLayout)?.visibility =
-            if (hostSystem == 4 && !moduleActive) View.VISIBLE else View.GONE
-        // 平板：显示分辨率区块（预设勾选框 + 手输行），预设勾选时隐藏手输行
-        findViewById<View?>(R.id.tabletResLayout)?.visibility =
-            if (hostSystem == 4 && !moduleActive && deviceType == DEVICE_TABLET)
-                View.VISIBLE else View.GONE
-        findViewById<View?>(R.id.tabletCustomResLayout)?.visibility =
-            if (tabletPreset) View.GONE else View.VISIBLE
-    }
-
-    private fun setHostSystem(host: Int) {
-        if (hostSystem == host) return
-        hostSystem = host
-        updatingHostUi = true
-        findViewById<MaterialCheckBox>(R.id.cbHostOs3).isChecked = host == 3
-        findViewById<MaterialCheckBox>(R.id.cbHostOs4).isChecked = host == 4
-        updatingHostUi = false
-        try {
-            getSharedPreferences(HOST_PREFS, Context.MODE_PRIVATE)
-                .edit().putInt(HOST_KEY, host).apply()
-        } catch (e: Exception) {
-        }
-        applyHostVisibility()
-        onHostSystemChanged(host)
-    }
-
-    private fun setDeviceType(type: Int) {
-        if (deviceType == type) return
-        deviceType = type
-        updatingDeviceUi = true
-        findViewById<MaterialCheckBox>(R.id.cbDevicePhone).isChecked = type == DEVICE_PHONE
-        findViewById<MaterialCheckBox>(R.id.cbDeviceTablet).isChecked = type == DEVICE_TABLET
-        updatingDeviceUi = false
-        try {
-            getSharedPreferences(HOST_PREFS, Context.MODE_PRIVATE)
-                .edit().putInt(DEVICE_KEY, type).apply()
-        } catch (e: Exception) {
-        }
-        applyHostVisibility()
-    }
-
-    private fun onHostSystemChanged(host: Int) {
-        val name = when (host) {
-            3 -> "HyperOS3"
-            4 -> "HyperOS4"
-            else -> null
-        }
-        if (name == null) {
-            Toast.makeText(this, "已清除宿主系统选择", Toast.LENGTH_SHORT).show()
+    private fun applyCompensated(bitmap: Bitmap, callback: (Bitmap) -> Unit) {
+        if (!cbAntiDarken.isChecked || moduleActive) {
+            croppedBitmap = bitmap
+            callback(bitmap)
             return
         }
-        if (moduleActive) {
-            Toast.makeText(this, "重启「壁纸」APP 后生效", Toast.LENGTH_LONG).show()
-        } else {
-            Toast.makeText(this, "宿主系统已选择 $name，设置壁纸时立即生效", Toast.LENGTH_SHORT).show()
-        }
+        Toast.makeText(this, "正在逆运算还原壁纸颜色...", Toast.LENGTH_SHORT).show()
+        Thread {
+            val compensated = AntiDarkenCompensator.compensate(bitmap)
+            runOnUiThread {
+                croppedBitmap = compensated
+                callback(compensated)
+            }
+        }.start()
     }
+
+    /**
+     * HyperOS4 + Shizuku：按引擎规则扩展位图（见 WallpaperBitmap.expandForOs4）。
+     * 手机：不执行逆运算扩展（返回原图）；平板：按屏幕分辨率扩展。
+     * 返回 null 表示配置不完整、已提示用户并中止本次设置。
+     */
+    private fun maybeExpandForOs4(bitmap: Bitmap): Bitmap? {
+        if (moduleActive || hostConfig.hostSystem != 4) return bitmap
+        when (hostConfig.deviceType) {
+            HostSystemConfig.DEVICE_PHONE -> return bitmap
+            HostSystemConfig.DEVICE_TABLET -> {}
+            else -> {
+                Toast.makeText(this, "请先在「宿主设备」中勾选设备类型（平板/手机）", Toast.LENGTH_LONG).show()
+                return null
+            }
+        }
+        val res = hostConfig.requireExpandResolution() ?: return null
+        return WallpaperBitmap.expandForOs4(this, bitmap, res[0], res[1])
+    }
+
+    // ===================== 防压暗开关 =====================
 
     /** HyperOS4 下暂不启用防压暗逻辑（模块不注入、Shizuku 不做逆运算），待验证后决定是否移除 */
     private fun updateAntiDarkenLabel() {
         if (moduleActive) {
             cbAntiDarken.text = "不压暗壁纸，更改后需重启壁纸APP"
         } else {
-            cbAntiDarken.text = "逆运算，压暗后壁纸颜色被还原"
+            cbAntiDarken.text = "逆运算，压暗后壁纸颜色近似还原，若颜色异常，请在相册手动调整后，不勾选此项设置壁纸"
         }
-    }
-
-    /**
-     * HyperOS4 + Shizuku：按引擎规则扩展位图。
-     * OS4 壁纸引擎计算 surface 时把位图缩放钳制在 ≤1（不放大覆盖屏幕），
-     * 随屏滚动下 surface 宽高比会偏离位图比例，导致壁纸被纵向居中裁切。
-     * 平板：按用户提供的屏幕分辨率把位图均匀放大到恰好覆盖屏幕，使钳制失效，
-     *       引擎计算结果与 HyperOS3 一致，选定区域即可完整显示；
-     * 手机：不执行逆运算扩展（返回 null 视为未配置）。
-     * 返回 null 表示配置不完整、已提示用户并中止本次设置。
-     */
-    private fun maybeExpandForOs4(bitmap: Bitmap): Bitmap? {
-        if (moduleActive || hostSystem != 4) return bitmap
-        when (deviceType) {
-            DEVICE_PHONE -> return bitmap
-            DEVICE_TABLET -> {}
-            else -> {
-                Toast.makeText(this, "请先在「宿主设备」中勾选设备类型（平板/手机）", Toast.LENGTH_LONG).show()
-                return null
-            }
-        }
-        val res: IntArray = if (tabletPreset) {
-            intArrayOf(3200, 2136)
-        } else {
-            val w = findViewById<TextInputEditText>(R.id.editResWidth).text?.toString()?.toIntOrNull() ?: 0
-            val h = findViewById<TextInputEditText>(R.id.editResHeight).text?.toString()?.toIntOrNull() ?: 0
-            if (w <= 0 || h <= 0) {
-                Toast.makeText(this, "请勾选或输入屏幕分辨率", Toast.LENGTH_LONG).show()
-                return null
-            }
-            intArrayOf(w, h)
-        }
-        return expandForOs4Shizuku(bitmap, res[0], res[1])
-    }
-
-    private fun expandForOs4Shizuku(src: Bitmap, screenW: Int, screenH: Int): Bitmap {
-        val scale = maxOf(
-            screenW / src.width.toFloat(),
-            screenH / src.height.toFloat()
-        )
-        if (scale <= 1f) return src
-        var nw = (src.width * scale + 0.5f).toInt()
-        var nh = (src.height * scale + 0.5f).toInt()
-        // GL 纹理尺寸上限保护
-        val maxDim = 4096
-        if (nw > maxDim || nh > maxDim) {
-            val k = maxDim / maxOf(nw, nh).toFloat()
-            nw = (nw * k).toInt()
-            nh = (nh * k).toInt()
-        }
-        if (nw <= src.width || nh <= src.height) return src
-        val out = Bitmap.createScaledBitmap(src, nw, nh, true)
-        Toast.makeText(this, "已按 HyperOS4 引擎规则扩展壁纸至 ${nw}x${nh}", Toast.LENGTH_LONG).show()
-        return out
     }
 
     private fun setupAntiDarkenCheckbox() {
@@ -918,112 +537,5 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, "重启「壁纸」APP 后生效", Toast.LENGTH_LONG).show()
             }
         }
-    }
-
-    /**
-     * 构建 reverseLut：reverseLut[k] = 输入明度 z_X（0..1），使得
-     * transformColor(z_X) 输出的明度 ≈ k/255 * 0.9。
-     *
-     * shader 中 transformColor 对明度 z 的正向映射：
-     *   v' = mix(z, z*0.9 + 0.1, z) = 1.1z - 0.1z²
-     *   最终明度 = v' * (1 - 0.1*z) = (1.1z - 0.1z²)(1 - 0.1z)，值域约为 [0, 0.9]
-     */
-    private fun buildReverseLut(): FloatArray {
-        val forwardLut = FloatArray(256)
-        for (i in 0 until 256) {
-            val z = i / 255f
-            val vp = 1.1f * z - 0.1f * z * z
-            forwardLut[i] = vp * (1f - 0.1f * z)
-        }
-        val reverseLut = FloatArray(256)
-        for (k in 0 until 256) {
-            val target = (k / 255f) * 0.9f
-            var lo = 0
-            var hi = 255
-            while (lo < hi) {
-                val mid = (lo + hi + 1) ushr 1
-                if (forwardLut[mid] <= target) lo = mid else hi = mid - 1
-            }
-            reverseLut[k] = lo / 255f
-        }
-        return reverseLut
-    }
-
-    /**
-     * 对原始 Bitmap 执行 transformColor 的逆运算，得到"应设置"的壁纸 X，
-     * 使得系统压暗（transformColor）后表现为原图。
-     *
-     * 每个像素：
-     *   (1) 原图 HSV(h, s, v)
-     *   (2) z_X = reverseLut(v) —— 使 (1.1z_X - 0.1z_X²)(1 - 0.1z_X) = v
-     *   (3) s_X = s / 0.98（因为正向把饱和度乘 0.98）
-     *   (4) 输出 X = hsv2rgb(h, s_X, z_X)
-     */
-    private fun compensateAntiDarken(src: Bitmap): Bitmap {
-        val w = src.width
-        val h = src.height
-        val pixels = IntArray(w * h)
-        src.getPixels(pixels, 0, w, 0, 0, w, h)
-        val reverseLut = buildReverseLut()
-
-        for (i in pixels.indices) {
-            val p = pixels[i]
-            val a = (p shr 24) and 0xFF
-            val r = ((p shr 16) and 0xFF) / 255f
-            val g = ((p shr 8) and 0xFF) / 255f
-            val b = (p and 0xFF) / 255f
-
-            // 原图 HSV
-            val maxC = maxOf(r, g, b)
-            val minC = minOf(r, g, b)
-            val delta = maxC - minC
-
-            var hue = 0f
-            var sat = 0f
-            if (maxC > 0f && delta > 1e-6f) {
-                sat = delta / maxC
-                hue = when (maxC) {
-                    r -> ((g - b) / delta % 6f + 6f) % 6f
-                    g -> (b - r) / delta + 2f
-                    else -> (r - g) / delta + 4f
-                }
-                hue /= 6f
-            }
-
-            // z_X：反查使压暗后明度=原明度的输入明度
-            val vOrig = maxC
-            var zX = 1f
-            if (vOrig < 0.9f) {
-                zX = reverseLut[((vOrig / 0.9f) * 255f).toInt().coerceIn(0, 255)]
-            }
-
-            // s_X：补偿饱和度（上限 1 防溢出）
-            val satX = (sat / 0.98f).coerceAtMost(1f)
-
-            // HSV(h, satX, zX) → RGB
-            val hi = (hue * 6f).toInt()
-            val f = hue * 6f - hi
-            val pVal = zX * (1f - satX)
-            val qVal = zX * (1f - f * satX)
-            val tVal = zX * (1f - (1f - f) * satX)
-
-            val (rF, gF, bF) = when (hi % 6) {
-                0 -> Triple(zX, tVal, pVal)
-                1 -> Triple(qVal, zX, pVal)
-                2 -> Triple(pVal, zX, tVal)
-                3 -> Triple(pVal, qVal, zX)
-                4 -> Triple(tVal, pVal, zX)
-                else -> Triple(zX, pVal, qVal)
-            }
-
-            pixels[i] = (a shl 24) or
-                    ((rF.coerceIn(0f, 1f) * 255f).toInt() shl 16) or
-                    ((gF.coerceIn(0f, 1f) * 255f).toInt() shl 8) or
-                    (bF.coerceIn(0f, 1f) * 255f).toInt()
-        }
-
-        val result = Bitmap.createBitmap(w, h, src.config)
-        result.setPixels(pixels, 0, w, 0, 0, w, h)
-        return result
     }
 }
