@@ -18,6 +18,7 @@
 - 绕过「锁屏编辑」的壁纸裁切
 - 支持桌面与锁屏壁纸同步滚动
 - 禁止/对抗系统自动压暗壁纸
+- 分别为浅色模式、深色模式设置单独的壁纸（仅Root）
 - 支持 **Root** 和 **Shizuku** 两种模式
 - 针对澎湃OS 3、澎湃OS 4 分别进行适配
 
@@ -90,6 +91,7 @@ HyperOS 3 removed scrolling wallpaper from the standard wallpaper-setting UI and
 - Set wallpapers directly without the cropping performed by the Lock Screen Editor
 - Support synchronized home-screen and lock-screen scrolling
 - Disable/Convert automatic wallpaper darkening
+- Set separate wallpapers for light mode and dark mode (Root only)
 - Support **Root** and **Shizuku** modes
 - HyperOS 3 and HyperOS 4 specific adaptations
 

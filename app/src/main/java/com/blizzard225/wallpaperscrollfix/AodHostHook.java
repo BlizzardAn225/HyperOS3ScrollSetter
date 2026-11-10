@@ -3,11 +3,9 @@ package com.blizzard225.wallpaperscrollfix;
 import android.content.Context;
 import android.graphics.Bitmap;
 
-import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XC_MethodReplacement;
-import de.robv.android.xposed.XposedBridge;
-import de.robv.android.xposed.XposedHelpers;
-import de.robv.android.xposed.callbacks.XC_LoadPackage;
+import java.lang.reflect.Method;
+
+import io.github.libxposed.api.XposedInterface;
 
 /**
  * com.miui.aod（AOD/锁屏编辑器）宿主 Hook：
@@ -21,103 +19,87 @@ class AodHostHook {
     // ================================================================
     // aodOS3 Hook (com.miui.aod)
     // ================================================================
-    static void hookAodApp(XC_LoadPackage.LoadPackageParam lpparam) {
-        XposedBridge.log(MainHook.TAG + ": hooked into " + MainHook.AOD_PKG);
-        hookAodEditorApplication(lpparam);
-        hookAodTemplateApiCrop(lpparam);
-        hookAodApplyWallpaper(lpparam);
+    static void hookAodApp(ClassLoader cl) {
+        MainHook.log("hooked into " + MainHook.AOD_PKG);
+        hookAodEditorApplication(cl);
+        hookAodTemplateApiCrop(cl);
+        hookAodApplyWallpaper(cl);
     }
 
-    private static void hookAodEditorApplication(XC_LoadPackage.LoadPackageParam lpparam) {
+    private static void hookAodEditorApplication(ClassLoader cl) {
         try {
-            XposedHelpers.findAndHookMethod(
-                    "com.miui.kg.editor.EditorApplication",
-                    lpparam.classLoader,
-                    "onCreate",
-                    new XC_MethodReplacement() {
-                        @Override
-                        protected Object replaceHookedMethod(MethodHookParam param) throws Throwable {
-                            param.setResult(null);
-                            XposedBridge.invokeOriginalMethod(param.method, param.thisObject, param.args);
-                            Context context = (Context) param.thisObject;
-                            MainHook.registerScrollObserver(context);
-                            android.provider.Settings.Secure.putInt(
-                                    context.getContentResolver(), MainHook.SCROLL_KEY, 1);
-                            XposedBridge.log(MainHook.TAG + "[AOD]: EditorApplication.onCreate, forced scroll=1");
-                            return null;
-                        }
-                    }
-            );
-            XposedBridge.log(MainHook.TAG + "[AOD]: Hook EditorApplication.onCreate OK");
+            Method m = XH.findMethodExact(
+                    XH.findClass("com.miui.kg.editor.EditorApplication", cl),
+                    "onCreate");
+            MainHook.xposed().hook(m).intercept(chain -> {
+                chain.proceed();
+                Context context = (Context) chain.getThisObject();
+                MainHook.registerScrollObserver(context);
+                android.provider.Settings.Secure.putInt(
+                        context.getContentResolver(), MainHook.SCROLL_KEY, 1);
+                MainHook.log("[AOD]: EditorApplication.onCreate, forced scroll=1");
+                return null;
+            });
+            MainHook.log("[AOD]: Hook EditorApplication.onCreate OK");
         } catch (Throwable t) {
-            XposedBridge.log(MainHook.TAG + "[AOD]: Hook EditorApplication.onCreate failed: " + t);
+            MainHook.logError("[AOD]: Hook EditorApplication.onCreate failed", t);
         }
     }
 
-    private static void hookAodApplyWallpaper(XC_LoadPackage.LoadPackageParam lpparam) {
+    private static void hookAodApplyWallpaper(ClassLoader cl) {
         Class<?> wallpaperInfoClass;
         Class<?> wallpaperApplyParamClass;
         try {
-            wallpaperInfoClass = lpparam.classLoader.loadClass(
+            wallpaperInfoClass = cl.loadClass(
                     "com.miui.keyguard.editor.data.bean.WallpaperInfo");
-            wallpaperApplyParamClass = lpparam.classLoader.loadClass(
+            wallpaperApplyParamClass = cl.loadClass(
                     "com.miui.keyguard.editor.data.template.WallpaperApplyParam");
         } catch (Throwable t) {
-            XposedBridge.log(MainHook.TAG + "[AOD]: Failed to load classes for applyWallpaper hooks: " + t);
+            MainHook.logError("[AOD]: Failed to load classes for applyWallpaper hooks", t);
             return;
         }
 
         try {
-            XposedHelpers.findAndHookMethod(
-                    "com.miui.keyguard.editor.data.template.TemplateApiImpl",
-                    lpparam.classLoader,
+            Method m = XH.findMethodExact(
+                    XH.findClass("com.miui.keyguard.editor.data.template.TemplateApiImpl", cl),
                     "applyImageWallpaper",
                     wallpaperInfoClass, String.class,
                     boolean.class, boolean.class, boolean.class,
-                    Bitmap.class, wallpaperApplyParamClass, boolean.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            boolean isLock = (boolean) param.args[3];
-                            MainHook.sIsLockscreenWallpaper.set(isLock);
-                            XposedBridge.log(MainHook.TAG + "[AOD]: applyImageWallpaper isLock=" + isLock);
-                        }
-
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                            MainHook.sIsLockscreenWallpaper.remove();
-                        }
-                    }
-            );
-            XposedBridge.log(MainHook.TAG + "[AOD]: Hook applyImageWallpaper OK");
+                    Bitmap.class, wallpaperApplyParamClass, boolean.class);
+            MainHook.xposed().hook(m).intercept(chain -> {
+                boolean isLock = (Boolean) chain.getArg(3);
+                MainHook.sIsLockscreenWallpaper.set(isLock);
+                MainHook.log("[AOD]: applyImageWallpaper isLock=" + isLock);
+                try {
+                    return chain.proceed();
+                } finally {
+                    MainHook.sIsLockscreenWallpaper.remove();
+                }
+            });
+            MainHook.log("[AOD]: Hook applyImageWallpaper OK");
         } catch (Throwable t) {
-            XposedBridge.log(MainHook.TAG + "[AOD]: Hook applyImageWallpaper failed: " + t);
+            MainHook.logError("[AOD]: Hook applyImageWallpaper failed", t);
         }
 
         try {
-            XposedHelpers.findAndHookMethod(
-                    "com.miui.keyguard.editor.data.template.TemplateApiImpl",
-                    lpparam.classLoader,
+            Method m = XH.findMethodExact(
+                    XH.findClass("com.miui.keyguard.editor.data.template.TemplateApiImpl", cl),
                     "applyGalleryWallpaper",
                     wallpaperInfoClass, String.class,
-                    boolean.class, boolean.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            boolean isLock = (boolean) param.args[2];
-                            MainHook.sIsLockscreenWallpaper.set(isLock);
-                            XposedBridge.log(MainHook.TAG + "[AOD]: applyGalleryWallpaper isLock=" + isLock);
-                        }
-
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                            MainHook.sIsLockscreenWallpaper.remove();
-                        }
-                    }
-            );
-            XposedBridge.log(MainHook.TAG + "[AOD]: Hook applyGalleryWallpaper OK");
+                    boolean.class, boolean.class);
+            MainHook.xposed().hook(m).intercept(chain -> {
+                boolean isLock = (Boolean) chain.getArg(2);
+                MainHook.sIsLockscreenWallpaper.set(isLock);
+                MainHook.log("[AOD]: applyGalleryWallpaper isLock=" + isLock);
+                try {
+                    return chain.proceed();
+                } finally {
+                    MainHook.sIsLockscreenWallpaper.remove();
+                }
+            });
+            MainHook.log("[AOD]: Hook applyGalleryWallpaper OK");
         } catch (Throwable t) {
-            XposedBridge.log(MainHook.TAG + "[AOD]: Hook applyGalleryWallpaper failed: " + t);
+            MainHook.logError("[AOD]: Hook applyGalleryWallpaper failed", t);
         }
     }
 
@@ -125,35 +107,31 @@ class AodHostHook {
     // aodOS3: Hook TemplateApiImpl.cropBitmap() 跳过裁切
     // 仅对桌面壁纸跳过裁切，锁屏壁纸允许正常裁切
     // ================================================================
-    private static void hookAodTemplateApiCrop(XC_LoadPackage.LoadPackageParam lpparam) {
+    private static void hookAodTemplateApiCrop(ClassLoader cl) {
         try {
-            Class<?> wallpaperPositionInfo = lpparam.classLoader.loadClass(
+            Class<?> wallpaperPositionInfo = cl.loadClass(
                     "com.miui.keyguard.editor.data.bean.WallpaperPositionInfo");
-            XposedHelpers.findAndHookMethod(
-                    "com.miui.keyguard.editor.data.template.TemplateApiImpl",
-                    lpparam.classLoader,
+            Method m = XH.findMethodExact(
+                    XH.findClass("com.miui.keyguard.editor.data.template.TemplateApiImpl", cl),
                     "cropBitmap",
-                    Bitmap.class, wallpaperPositionInfo, boolean.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) {
-                            Boolean isLock = MainHook.sIsLockscreenWallpaper.get();
-                            if (isLock != null && isLock) {
-                                XposedBridge.log(MainHook.TAG + "[AOD]: cropBitmap allowing normal crop for lockscreen wallpaper");
-                                return;
-                            }
-                            Bitmap original = (Bitmap) param.args[0];
-                            if (original != null) {
-                                XposedBridge.log(MainHook.TAG + "[AOD]: cropBitmap intercepted for home wallpaper, "
-                                        + "returning original " + original.getWidth() + "x" + original.getHeight());
-                                param.setResult(original);
-                            }
-                        }
-                    }
-            );
-            XposedBridge.log(MainHook.TAG + "[AOD]: Hook TemplateApiImpl.cropBitmap OK");
+                    Bitmap.class, wallpaperPositionInfo, boolean.class);
+            MainHook.xposed().hook(m).intercept(chain -> {
+                Boolean isLock = MainHook.sIsLockscreenWallpaper.get();
+                if (isLock != null && isLock) {
+                    MainHook.log("[AOD]: cropBitmap allowing normal crop for lockscreen wallpaper");
+                    return chain.proceed();
+                }
+                Bitmap original = (Bitmap) chain.getArg(0);
+                if (original != null) {
+                    MainHook.log("[AOD]: cropBitmap intercepted for home wallpaper, "
+                            + "returning original " + original.getWidth() + "x" + original.getHeight());
+                    return original;
+                }
+                return chain.proceed();
+            });
+            MainHook.log("[AOD]: Hook TemplateApiImpl.cropBitmap OK");
         } catch (Throwable t) {
-            XposedBridge.log(MainHook.TAG + "[AOD]: Hook TemplateApiImpl.cropBitmap failed: " + t);
+            MainHook.logError("[AOD]: Hook TemplateApiImpl.cropBitmap failed", t);
         }
     }
 }

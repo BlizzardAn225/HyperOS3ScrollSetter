@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="xposed_description">在澎湃OS3/4上设置随屏滚动壁纸。Fix wallpaper scroll on HyperOS3/4 and set wallpapers</string>
+</resources>

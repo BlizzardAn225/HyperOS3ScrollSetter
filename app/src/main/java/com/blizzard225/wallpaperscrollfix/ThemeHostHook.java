@@ -3,11 +3,9 @@ package com.blizzard225.wallpaperscrollfix;
 import android.content.Context;
 import android.graphics.Bitmap;
 
-import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XC_MethodReplacement;
-import de.robv.android.xposed.XposedBridge;
-import de.robv.android.xposed.XposedHelpers;
-import de.robv.android.xposed.callbacks.XC_LoadPackage;
+import java.lang.reflect.Method;
+
+import io.github.libxposed.api.XposedInterface;
 
 /**
  * com.android.thememanager（主题）宿主 Hook：
@@ -21,173 +19,140 @@ class ThemeHostHook {
     // ================================================================
     // com.android.thememanager
     // ================================================================
-    static void hookThemePkg(XC_LoadPackage.LoadPackageParam lpparam) {
-        XposedBridge.log(MainHook.TAG + ": hooked into " + MainHook.THEME_PKG);
+    static void hookThemePkg(ClassLoader cl) {
+        MainHook.log("hooked into " + MainHook.THEME_PKG);
 
-        hookThemeOcQ(lpparam);
-        hookThemeOcN(lpparam);
-        hookThemeN5r1(lpparam);
-        hookThemeL(lpparam);
-        hookThemeLrht(lpparam);
-        hookThemeGyi(lpparam);
-        hookThemeNi7(lpparam);
-        hookThemeTemplateApiCrop(lpparam);
-        hookThemeApplyWallpaper(lpparam);
+        hookThemeOcQ(cl);
+        hookThemeOcN(cl);
+        hookThemeN5r1(cl);
+        hookThemeL(cl);
+        hookThemeLrht(cl);
+        hookThemeGyi(cl);
+        hookThemeNi7(cl);
+        hookThemeTemplateApiCrop(cl);
+        hookThemeApplyWallpaper(cl);
     }
 
-    private static void hookThemeOcQ(XC_LoadPackage.LoadPackageParam lpparam) {
+    private static void hookThemeOcQ(ClassLoader cl) {
         try {
-            XposedHelpers.findAndHookMethod(
-                    "com.android.thememanager.util.oc",
-                    lpparam.classLoader,
-                    "q",
-                    int.class, int.class, boolean.class, boolean.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) {
-                            boolean original = (boolean) param.args[2];
-                            if (!original) {
-                                XposedBridge.log(MainHook.TAG + "[Theme]: oc.q isScrollable false->true "
-                                        + " img=" + param.args[0] + "x" + param.args[1]);
-                                param.args[2] = true;
-                            }
-                        }
-                    }
-            );
-            XposedBridge.log(MainHook.TAG + ": Hook oc.q OK");
+            Method m = XH.findMethodExact(
+                    XH.findClass("com.android.thememanager.util.oc", cl),
+                    "q", int.class, int.class, boolean.class, boolean.class);
+            MainHook.xposed().hook(m).intercept(chain -> {
+                boolean original = (Boolean) chain.getArg(2);
+                if (!original) {
+                    MainHook.log("[Theme]: oc.q isScrollable false->true "
+                            + " img=" + chain.getArg(0) + "x" + chain.getArg(1));
+                    return chain.proceed(new Object[]{
+                            chain.getArg(0), chain.getArg(1), true, chain.getArg(3)});
+                }
+                return chain.proceed();
+            });
+            MainHook.log("Hook oc.q OK");
         } catch (Throwable t) {
-            XposedBridge.log(MainHook.TAG + ": Hook oc.q failed: " + t);
+            MainHook.logError("Hook oc.q failed", t);
         }
     }
 
-    private static void hookThemeOcN(XC_LoadPackage.LoadPackageParam lpparam) {
+    private static void hookThemeOcN(ClassLoader cl) {
         try {
-            XposedHelpers.findAndHookMethod(
-                    "com.android.thememanager.util.oc",
-                    lpparam.classLoader,
-                    "n",
-                    boolean.class, int.class, int.class, float.class, boolean.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) {
-                            boolean original = (boolean) param.args[0];
-                            if (!original) {
-                                XposedBridge.log(MainHook.TAG + "[Theme]: oc.n isScrollable false->true");
-                                param.args[0] = true;
-                            }
-                        }
-                    }
-            );
-            XposedBridge.log(MainHook.TAG + ": Hook oc.n OK");
+            Method m = XH.findMethodExact(
+                    XH.findClass("com.android.thememanager.util.oc", cl),
+                    "n", boolean.class, int.class, int.class, float.class, boolean.class);
+            MainHook.xposed().hook(m).intercept(chain -> {
+                boolean original = (Boolean) chain.getArg(0);
+                if (!original) {
+                    MainHook.log("[Theme]: oc.n isScrollable false->true");
+                    return chain.proceed(new Object[]{
+                            true, chain.getArg(1), chain.getArg(2), chain.getArg(3), chain.getArg(4)});
+                }
+                return chain.proceed();
+            });
+            MainHook.log("Hook oc.n OK");
         } catch (Throwable t) {
-            XposedBridge.log(MainHook.TAG + ": Hook oc.n failed: " + t);
+            MainHook.logError("Hook oc.n failed", t);
         }
     }
 
-    private static void hookThemeN5r1(XC_LoadPackage.LoadPackageParam lpparam) {
+    private static void hookThemeN5r1(ClassLoader cl) {
         try {
-            Class<?> screenTypeClass = XposedHelpers.findClass(
-                    "com.android.thememanager.util.WindowScreenUtils$ScreenType",
-                    lpparam.classLoader);
-            XposedHelpers.findAndHookMethod(
-                    "com.android.thememanager.util.lh",
-                    lpparam.classLoader,
-                    "n5r1",
-                    boolean.class, screenTypeClass,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) {
-                            boolean original = (boolean) param.args[0];
-                            if (!original) {
-                                XposedBridge.log(MainHook.TAG + "[Theme]: n5r1 isScrollable false->true");
-                                param.args[0] = true;
-                            }
-                        }
-                    }
-            );
-            XposedBridge.log(MainHook.TAG + ": Hook lh.n5r1 OK");
+            Class<?> screenTypeClass = XH.findClass(
+                    "com.android.thememanager.util.WindowScreenUtils$ScreenType", cl);
+            Method m = XH.findMethodExact(
+                    XH.findClass("com.android.thememanager.util.lh", cl),
+                    "n5r1", boolean.class, screenTypeClass);
+            MainHook.xposed().hook(m).intercept(chain -> {
+                boolean original = (Boolean) chain.getArg(0);
+                if (!original) {
+                    MainHook.log("[Theme]: n5r1 isScrollable false->true");
+                    return chain.proceed(new Object[]{true, chain.getArg(1)});
+                }
+                return chain.proceed();
+            });
+            MainHook.log("Hook lh.n5r1 OK");
         } catch (Throwable t) {
-            XposedBridge.log(MainHook.TAG + ": Hook lh.n5r1 failed: " + t);
+            MainHook.logError("Hook lh.n5r1 failed", t);
         }
     }
 
-    private static void hookThemeL(XC_LoadPackage.LoadPackageParam lpparam) {
+    private static void hookThemeL(ClassLoader cl) {
         try {
-            XposedHelpers.findAndHookMethod(
-                    "com.android.thememanager.util.lh",
-                    lpparam.classLoader,
-                    "l",
-                    boolean.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) {
-                            boolean original = (boolean) param.args[0];
-                            if (!original) {
-                                XposedBridge.log(MainHook.TAG + "[Theme]: lh.l isScrollable false->true");
-                                param.args[0] = true;
-                            }
-                        }
-                    }
-            );
-            XposedBridge.log(MainHook.TAG + ": Hook lh.l OK");
+            Method m = XH.findMethodExact(
+                    XH.findClass("com.android.thememanager.util.lh", cl),
+                    "l", boolean.class);
+            MainHook.xposed().hook(m).intercept(chain -> {
+                boolean original = (Boolean) chain.getArg(0);
+                if (!original) {
+                    MainHook.log("[Theme]: lh.l isScrollable false->true");
+                    return chain.proceed(new Object[]{true});
+                }
+                return chain.proceed();
+            });
+            MainHook.log("Hook lh.l OK");
         } catch (Throwable t) {
-            XposedBridge.log(MainHook.TAG + ": Hook lh.l failed: " + t);
+            MainHook.logError("Hook lh.l failed", t);
         }
     }
 
-    private static void hookThemeLrht(XC_LoadPackage.LoadPackageParam lpparam) {
+    private static void hookThemeLrht(ClassLoader cl) {
         try {
-            XposedHelpers.findAndHookMethod(
-                    "com.android.thememanager.util.lh",
-                    lpparam.classLoader,
-                    "lrht",
-                    new XC_MethodReplacement() {
-                        @Override
-                        protected Object replaceHookedMethod(MethodHookParam param) {
-                            return true;
-                        }
-                    }
-            );
-            XposedBridge.log(MainHook.TAG + ": Hook lh.lrht -> true OK");
+            Method m = XH.findMethodExact(
+                    XH.findClass("com.android.thememanager.util.lh", cl),
+                    "lrht");
+            MainHook.xposed().hook(m).intercept(chain -> true);
+            MainHook.log("Hook lh.lrht -> true OK");
         } catch (Throwable t) {
-            XposedBridge.log(MainHook.TAG + ": Hook lh.lrht failed: " + t);
+            MainHook.logError("Hook lh.lrht failed", t);
         }
     }
 
-    private static void hookThemeGyi(XC_LoadPackage.LoadPackageParam lpparam) {
+    private static void hookThemeGyi(ClassLoader cl) {
         try {
-            XposedHelpers.findAndHookMethod(
-                    "com.android.thememanager.util.lh",
-                    lpparam.classLoader,
-                    "gyi",
-                    Context.class, boolean.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) {
-                            boolean original = (boolean) param.args[1];
-                            if (!original) {
-                                XposedBridge.log(MainHook.TAG + "[Theme]: gyi false->true");
-                                param.args[1] = true;
-                            }
-                        }
-                    }
-            );
-            XposedBridge.log(MainHook.TAG + ": Hook lh.gyi OK");
+            Method m = XH.findMethodExact(
+                    XH.findClass("com.android.thememanager.util.lh", cl),
+                    "gyi", Context.class, boolean.class);
+            MainHook.xposed().hook(m).intercept(chain -> {
+                boolean original = (Boolean) chain.getArg(1);
+                if (!original) {
+                    MainHook.log("[Theme]: gyi false->true");
+                    return chain.proceed(new Object[]{chain.getArg(0), true});
+                }
+                return chain.proceed();
+            });
+            MainHook.log("Hook lh.gyi OK");
         } catch (Throwable t) {
-            XposedBridge.log(MainHook.TAG + ": Hook lh.gyi failed: " + t);
+            MainHook.logError("Hook lh.gyi failed", t);
         }
     }
 
-    private static void hookThemeNi7(XC_LoadPackage.LoadPackageParam lpparam) {
+    private static void hookThemeNi7(ClassLoader cl) {
         try {
-            Class<?> ngyClass = XposedHelpers.findClass(
-                    "com.android.thememanager.util.ngy", lpparam.classLoader);
-            Class<?> applyInfosClass = XposedHelpers.findClass(
-                    "com.android.thememanager.model.WallpaperApplyInfos", lpparam.classLoader);
+            Class<?> ngyClass = XH.findClass("com.android.thememanager.util.ngy", cl);
+            Class<?> applyInfosClass = XH.findClass(
+                    "com.android.thememanager.model.WallpaperApplyInfos", cl);
 
-            XposedHelpers.findAndHookMethod(
-                    "com.android.thememanager.util.lh",
-                    lpparam.classLoader,
+            Method m = XH.findMethodExact(
+                    XH.findClass("com.android.thememanager.util.lh", cl),
                     "ni7",
                     Context.class,
                     String.class,
@@ -200,89 +165,78 @@ class ThemeHostHook {
                     Bitmap.class,
                     ngyClass,
                     applyInfosClass,
-                    boolean.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) {
-                            boolean isLockscreen = (boolean) param.args[5];
-                            boolean isScrollable = (boolean) param.args[6];
-                            if (!isLockscreen && !isScrollable) {
-                                param.args[6] = true;
-                                XposedBridge.log(MainHook.TAG + "[Theme]: ni7 isScrollable false->true");
-                            }
-                        }
-                    }
-            );
-            XposedBridge.log(MainHook.TAG + ": Hook lh.ni7 OK");
+                    boolean.class);
+            MainHook.xposed().hook(m).intercept(chain -> {
+                Object[] args = chain.getArgs().toArray();
+                boolean isLockscreen = (Boolean) args[5];
+                boolean isScrollable = (Boolean) args[6];
+                if (!isLockscreen && !isScrollable) {
+                    args[6] = true;
+                    MainHook.log("[Theme]: ni7 isScrollable false->true");
+                    return chain.proceed(args);
+                }
+                return chain.proceed();
+            });
+            MainHook.log("Hook lh.ni7 OK");
         } catch (Throwable t) {
-            XposedBridge.log(MainHook.TAG + ": Hook lh.ni7 failed: " + t);
+            MainHook.logError("Hook lh.ni7 failed", t);
         }
     }
 
-    private static void hookThemeApplyWallpaper(XC_LoadPackage.LoadPackageParam lpparam) {
+    private static void hookThemeApplyWallpaper(ClassLoader cl) {
         Class<?> wallpaperInfoClass;
         Class<?> wallpaperApplyParamClass;
         try {
-            wallpaperInfoClass = lpparam.classLoader.loadClass(
+            wallpaperInfoClass = cl.loadClass(
                     "com.miui.keyguard.editor.data.bean.WallpaperInfo");
-            wallpaperApplyParamClass = lpparam.classLoader.loadClass(
+            wallpaperApplyParamClass = cl.loadClass(
                     "com.miui.keyguard.editor.data.template.c");
         } catch (Throwable t) {
-            XposedBridge.log(MainHook.TAG + "[Theme]: Failed to load classes for applyWallpaper hooks: " + t);
+            MainHook.logError("[Theme]: Failed to load classes for applyWallpaper hooks", t);
             return;
         }
 
         try {
-            XposedHelpers.findAndHookMethod(
-                    "com.miui.keyguard.editor.data.template.TemplateApiImpl",
-                    lpparam.classLoader,
+            Method m = XH.findMethodExact(
+                    XH.findClass("com.miui.keyguard.editor.data.template.TemplateApiImpl", cl),
                     "qkj8",
                     wallpaperInfoClass, String.class,
                     boolean.class, boolean.class, boolean.class,
-                    Bitmap.class, wallpaperApplyParamClass, boolean.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) {
-                            boolean isLock = (boolean) param.args[3];
-                            MainHook.sIsLockscreenWallpaper.set(isLock);
-                            XposedBridge.log(MainHook.TAG + "[Theme]: qkj8(applyImageWallpaper) isLock=" + isLock);
-                        }
-
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            MainHook.sIsLockscreenWallpaper.remove();
-                        }
-                    }
-            );
-            XposedBridge.log(MainHook.TAG + "[Theme]: Hook qkj8(applyImageWallpaper) OK");
+                    Bitmap.class, wallpaperApplyParamClass, boolean.class);
+            MainHook.xposed().hook(m).intercept(chain -> {
+                boolean isLock = (Boolean) chain.getArg(3);
+                MainHook.sIsLockscreenWallpaper.set(isLock);
+                MainHook.log("[Theme]: qkj8(applyImageWallpaper) isLock=" + isLock);
+                try {
+                    return chain.proceed();
+                } finally {
+                    MainHook.sIsLockscreenWallpaper.remove();
+                }
+            });
+            MainHook.log("[Theme]: Hook qkj8(applyImageWallpaper) OK");
         } catch (Throwable t) {
-            XposedBridge.log(MainHook.TAG + "[Theme]: Hook qkj8(applyImageWallpaper) failed: " + t);
+            MainHook.logError("[Theme]: Hook qkj8(applyImageWallpaper) failed", t);
         }
 
         try {
-            XposedHelpers.findAndHookMethod(
-                    "com.miui.keyguard.editor.data.template.TemplateApiImpl",
-                    lpparam.classLoader,
+            Method m = XH.findMethodExact(
+                    XH.findClass("com.miui.keyguard.editor.data.template.TemplateApiImpl", cl),
                     "d",
                     wallpaperInfoClass, String.class,
-                    boolean.class, boolean.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) {
-                            boolean isLock = (boolean) param.args[2];
-                            MainHook.sIsLockscreenWallpaper.set(isLock);
-                            XposedBridge.log(MainHook.TAG + "[Theme]: d(applyGalleryWallpaper) isLock=" + isLock);
-                        }
-
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            MainHook.sIsLockscreenWallpaper.remove();
-                        }
-                    }
-            );
-            XposedBridge.log(MainHook.TAG + "[Theme]: Hook d(applyGalleryWallpaper) OK");
+                    boolean.class, boolean.class);
+            MainHook.xposed().hook(m).intercept(chain -> {
+                boolean isLock = (Boolean) chain.getArg(2);
+                MainHook.sIsLockscreenWallpaper.set(isLock);
+                MainHook.log("[Theme]: d(applyGalleryWallpaper) isLock=" + isLock);
+                try {
+                    return chain.proceed();
+                } finally {
+                    MainHook.sIsLockscreenWallpaper.remove();
+                }
+            });
+            MainHook.log("[Theme]: Hook d(applyGalleryWallpaper) OK");
         } catch (Throwable t) {
-            XposedBridge.log(MainHook.TAG + "[Theme]: Hook d(applyGalleryWallpaper) failed: " + t);
+            MainHook.logError("[Theme]: Hook d(applyGalleryWallpaper) failed", t);
         }
     }
 
@@ -290,35 +244,31 @@ class ThemeHostHook {
     // thememanagerOS3: Hook TemplateApiImpl.s() 跳过裁切
     // 仅对桌面壁纸跳过裁切，锁屏壁纸允许正常裁切
     // ================================================================
-    private static void hookThemeTemplateApiCrop(XC_LoadPackage.LoadPackageParam lpparam) {
+    private static void hookThemeTemplateApiCrop(ClassLoader cl) {
         try {
-            Class<?> wallpaperPositionInfo = lpparam.classLoader.loadClass(
+            Class<?> wallpaperPositionInfo = cl.loadClass(
                     "com.miui.keyguard.editor.data.bean.WallpaperPositionInfo");
-            XposedHelpers.findAndHookMethod(
-                    "com.miui.keyguard.editor.data.template.TemplateApiImpl",
-                    lpparam.classLoader,
+            Method m = XH.findMethodExact(
+                    XH.findClass("com.miui.keyguard.editor.data.template.TemplateApiImpl", cl),
                     "s",
-                    Bitmap.class, wallpaperPositionInfo, boolean.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) {
-                            Boolean isLock = MainHook.sIsLockscreenWallpaper.get();
-                            if (isLock != null && isLock) {
-                                XposedBridge.log(MainHook.TAG + "[Theme]: s(cropBitmap) allowing normal crop for lockscreen wallpaper");
-                                return;
-                            }
-                            Bitmap original = (Bitmap) param.args[0];
-                            if (original != null) {
-                                XposedBridge.log(MainHook.TAG + "[Theme]: s(cropBitmap) intercepted for home wallpaper, "
-                                        + "returning original " + original.getWidth() + "x" + original.getHeight());
-                                param.setResult(original);
-                            }
-                        }
-                    }
-            );
-            XposedBridge.log(MainHook.TAG + "[Theme]: Hook TemplateApiImpl.s OK");
+                    Bitmap.class, wallpaperPositionInfo, boolean.class);
+            MainHook.xposed().hook(m).intercept(chain -> {
+                Boolean isLock = MainHook.sIsLockscreenWallpaper.get();
+                if (isLock != null && isLock) {
+                    MainHook.log("[Theme]: s(cropBitmap) allowing normal crop for lockscreen wallpaper");
+                    return chain.proceed();
+                }
+                Bitmap original = (Bitmap) chain.getArg(0);
+                if (original != null) {
+                    MainHook.log("[Theme]: s(cropBitmap) intercepted for home wallpaper, "
+                            + "returning original " + original.getWidth() + "x" + original.getHeight());
+                    return original;
+                }
+                return chain.proceed();
+            });
+            MainHook.log("[Theme]: Hook TemplateApiImpl.s OK");
         } catch (Throwable t) {
-            XposedBridge.log(MainHook.TAG + "[Theme]: Hook TemplateApiImpl.s failed: " + t);
+            MainHook.logError("[Theme]: Hook TemplateApiImpl.s failed", t);
         }
     }
 }

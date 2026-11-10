@@ -19,6 +19,8 @@ class CropImageView @JvmOverloads constructor(
     private var cropRect = RectF()
     private var imageRect = RectF()
     private var aspectRatio: Float? = null
+    // 待应用的裁剪框（0..1 源图比例）：由外部设置，在 onDraw（imageRect 就绪）时落位
+    private var pendingCropFractions: RectF? = null
 
     private var isDragging = false
     private var isResizing = false
@@ -57,7 +59,16 @@ class CropImageView @JvmOverloads constructor(
 
         imageRect.set(left, top, left + scaledWidth, top + scaledHeight)
 
-        if (cropRect.isEmpty) {
+        val pending = pendingCropFractions
+        if (pending != null) {
+            cropRect.set(
+                imageRect.left + pending.left * imageRect.width(),
+                imageRect.top + pending.top * imageRect.height(),
+                imageRect.left + pending.right * imageRect.width(),
+                imageRect.top + pending.bottom * imageRect.height()
+            )
+            pendingCropFractions = null
+        } else if (cropRect.isEmpty) {
             resetCropRect()
         }
 
@@ -393,6 +404,24 @@ class CropImageView @JvmOverloads constructor(
     fun reset() {
         cropRect.setEmpty()
         imageRect.setEmpty()
+        invalidate()
+    }
+
+    /** 裁剪框（0..1 源图比例）；无有效图像/裁剪框时返回 null */
+    fun getCropRectFractions(): RectF? {
+        if (drawable == null || imageRect.isEmpty || cropRect.isEmpty) return null
+        if (imageRect.width() <= 0 || imageRect.height() <= 0) return null
+        return RectF(
+            (cropRect.left - imageRect.left) / imageRect.width(),
+            (cropRect.top - imageRect.top) / imageRect.height(),
+            (cropRect.right - imageRect.left) / imageRect.width(),
+            (cropRect.bottom - imageRect.top) / imageRect.height()
+        )
+    }
+
+    /** 按比例设置裁剪框：在下一次 onDraw（imageRect 就绪）时应用，时序安全 */
+    fun setCropRectFractions(f: RectF?) {
+        pendingCropFractions = if (f == null) null else RectF(f)
         invalidate()
     }
 }

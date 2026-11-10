@@ -59,8 +59,9 @@ object WallpaperBitmap {
         }
     }
 
-    fun setBoth(context: Context, bitmap: Bitmap) {
-        try {
+    /** @return true=写入成功（清缓存由调用方处理；API82 沿用具体目标成功文案） */
+    fun setBoth(context: Context, bitmap: Bitmap): Boolean {
+        return try {
             val wm = WallpaperManager.getInstance(context)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -75,14 +76,16 @@ object WallpaperBitmap {
             }
 
             Toast.makeText(context, "桌面 + 锁屏壁纸已设置", Toast.LENGTH_LONG).show()
-
+            true
         } catch (e: Exception) {
             Toast.makeText(context, "设置失败: ${e.message}", Toast.LENGTH_LONG).show()
+            false
         }
     }
 
-    fun setStandard(context: Context, bitmap: Bitmap) {
-        try {
+    /** @return true=写入成功（清缓存由调用方处理；API82 沿用具体目标成功文案） */
+    fun setStandard(context: Context, bitmap: Bitmap): Boolean {
+        return try {
             val wm = WallpaperManager.getInstance(context)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -97,14 +100,16 @@ object WallpaperBitmap {
             }
 
             Toast.makeText(context, "桌面壁纸已设置", Toast.LENGTH_LONG).show()
-
+            true
         } catch (e: Exception) {
             Toast.makeText(context, "设置失败: ${e.message}", Toast.LENGTH_LONG).show()
+            false
         }
     }
 
-    fun setLock(context: Context, bitmap: Bitmap) {
-        try {
+    /** @return true=写入成功（清缓存由调用方处理；API82 沿用具体目标成功文案） */
+    fun setLock(context: Context, bitmap: Bitmap): Boolean {
+        return try {
             val wm = WallpaperManager.getInstance(context)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -117,11 +122,10 @@ object WallpaperBitmap {
             } else {
                 wm.setBitmap(bitmap)
             }
-
-            Toast.makeText(context, "锁屏壁纸已设置", Toast.LENGTH_LONG).show()
-
+            true
         } catch (e: Exception) {
             Toast.makeText(context, "设置失败: ${e.message}", Toast.LENGTH_LONG).show()
+            false
         }
     }
 

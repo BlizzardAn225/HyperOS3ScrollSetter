@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 分模式壁纸写入的待应用图片（MainActivity.encodeToCache） -->
+    <cache-path
+        name="wallpaper_apply"
+        path="wallpaper_apply/" />
+</paths>

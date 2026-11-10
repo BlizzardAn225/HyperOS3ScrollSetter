@@ -13,15 +13,11 @@
         android:icon="@mipmap/logo"
         android:roundIcon="@mipmap/logo_round"
         android:label="壁纸设置器"
+        android:description="@string/xposed_description"
         android:theme="@style/Theme.WallpaperTool">
 
-        <!-- LSPosed 模块声明 -->
-        <meta-data android:name="xposedmodule" android:value="true" />
-        <meta-data android:name="xposeddescription" android:value="在澎湃OS3/4上设置随屏滚动壁纸。Fix wallpaper scroll on HyperOS3/4 and set wallpapers" />
-        <meta-data android:name="xposedminversion" android:value="82" />
-        <meta-data android:name="xposedscope"
-            android:value="android;com.miui.miwallpaper;com.android.thememanager;com.miui.aod;com.blizzard225.wallpapersetter" />
-
+        <!-- 模块声明走 META-INF/xposed/（java_init.list / scope.list / module.prop），
+             现代 libxposed API 不再使用 manifest meta-data -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -38,6 +34,17 @@
             android:exported="true"
             android:multiprocess="false"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+        <!-- 分模式壁纸写入：向壁纸进程 hook 提供待应用图片（grantUriPermission 临时授权） -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
     </application>
 

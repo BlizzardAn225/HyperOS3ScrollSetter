@@ -107,7 +107,7 @@ object AntiDarkenCompensator {
                     (bF.coerceIn(0f, 1f) * 255f).toInt()
         }
 
-        val result = Bitmap.createBitmap(w, h, src.config)
+        val result = Bitmap.createBitmap(w, h, src.config ?: Bitmap.Config.ARGB_8888)
         result.setPixels(pixels, 0, w, 0, 0, w, h)
         return result
     }
